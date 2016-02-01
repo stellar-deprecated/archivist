@@ -1,0 +1,4 @@
+.travis.yml
+archivist.test
+cmd/stellar-archivist/stellar-archivist
+*~
