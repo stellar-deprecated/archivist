@@ -115,9 +115,9 @@ func (a *Archive) ListAllBuckets() (chan string, chan error) {
 	return a.backend.ListFiles("bucket")
 }
 
-	ch := make(chan Hash, 1000)
 func (a *Archive) ListAllBucketHashes() (chan Hash, chan error) {
 	sch, errs := a.backend.ListFiles("bucket")
+	ch := make(chan Hash)
 	rx := regexp.MustCompile("bucket" + hexPrefixPat + "bucket-([0-9a-f]{64})\\.xdr\\.gz$")
 	go func() {
 		for s := range sch {
@@ -135,8 +135,8 @@ func (a *Archive) ListCategoryCheckpoints(cat string, pth string) (chan uint32, 
 	ext := categoryExt(cat)
 	rx := regexp.MustCompile(cat + hexPrefixPat + cat +
 		"-([0-9a-f]{8})\\." + regexp.QuoteMeta(ext) + "$")
-	ch := make(chan uint32, 1000)
 	sch, errs := a.backend.ListFiles(path.Join(cat, pth))
+	ch := make(chan uint32)
 	errch := make(chan error)
 
 	// Need a separate pump on the error channel to ensure upstream progress. Don't roll

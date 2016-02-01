@@ -43,7 +43,7 @@ func (b *S3ArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
 
 func (b *S3ArchiveBackend) ListFiles(pth string) (chan string, chan error) {
 	prefix := path.Join(b.prefix, pth)
-	ch := make(chan string, 1000)
+	ch := make(chan string)
 	errs := make(chan error)
 
 	params := &s3.ListObjectsInput{
