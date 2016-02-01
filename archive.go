@@ -116,10 +116,66 @@ func (a *Archive) ListAllBuckets() (chan string, chan error) {
 	return a.backend.ListFiles("bucket")
 }
 
+// Make a goroutine that unconditionally pulls an error channel into
+// (unbounded) local memory, and feeds it to a downstream consumer. This is
+// slightly hacky, but the alternatives are to either send {val,err} pairs
+// along each "primary" channel, or else risk a primary channel producer
+// stalling because nobody's draining its error channel yet. I (vaguely,
+// currently) prefer this approach, though time will tell if it has a
+// good taste later.
+//
+// Code here modeled on github.com/eapache/channels/infinite_channel.go
+func makeErrorPump(in chan error) chan error {
+	buf := make([]error, 0)
+	var next error
+	ret := make(chan error)
+	go func() {
+		var out chan error
+		for in != nil || out != nil {
+			select {
+			case err, ok := <-in:
+				if ok {
+					buf = append(buf, err)
+				} else {
+					in = nil
+				}
+			case out <- next:
+				buf = buf[1:]
+			}
+			if len(buf) > 0 {
+				out = ret
+				next = buf[0]
+			} else {
+				out = nil
+				next = nil
+			}
+		}
+		close(ret)
+	}()
+	return ret
+}
+
+func noteError(e error) uint32 {
+	if e != nil {
+		log.Printf("Error: " + e.Error())
+		return 1
+	}
+	return 0
+}
+
+func drainErrors(errs chan error) uint32 {
+	var count uint32
+	for e := range errs {
+		count += noteError(e)
+	}
+	return count
+}
+
 func (a *Archive) ListAllBucketHashes() (chan Hash, chan error) {
 	sch, errs := a.backend.ListFiles("bucket")
 	ch := make(chan Hash)
 	rx := regexp.MustCompile("bucket" + hexPrefixPat + "bucket-([0-9a-f]{64})\\.xdr\\.gz$")
+	errs = makeErrorPump(errs)
 	go func() {
 		for s := range sch {
 			m := rx.FindStringSubmatch(s)
@@ -138,15 +194,7 @@ func (a *Archive) ListCategoryCheckpoints(cat string, pth string) (chan uint32, 
 		"-([0-9a-f]{8})\\." + regexp.QuoteMeta(ext) + "$")
 	sch, errs := a.backend.ListFiles(path.Join(cat, pth))
 	ch := make(chan uint32)
-	errch := make(chan error)
-
-	// Need a separate pump on the error channel to ensure upstream progress. Don't roll
-	// your eyes. I know, I know.
-	go func() {
-		for e := range errs {
-			errch <- e
-		}
-	}()
+	errs = makeErrorPump(errs)
 
 	go func() {
 		for s := range sch {
@@ -265,8 +313,7 @@ func Mirror(src *Archive, dst *Archive, rng Range) error {
 				}
 				has, e := src.GetCheckpointHAS(ix)
 				if e != nil {
-					log.Printf("Error: " + e.Error())
-					atomic.AddUint32(&errs, 1)
+					atomic.AddUint32(&errs, noteError(e))
 					continue
 				}
 				for _, bucket := range has.Buckets() {
@@ -279,23 +326,17 @@ func Mirror(src *Archive, dst *Archive, rng Range) error {
 					bucketFetchMutex.Unlock()
 					if !alreadyFetching {
 						pth := BucketPath(bucket)
-						if e = copyPath(src, dst, pth); e != nil {
-							log.Printf("Error: " + e.Error())
-							atomic.AddUint32(&errs, 1)
-						}
+						e = copyPath(src, dst, pth)
+						atomic.AddUint32(&errs, noteError(e))
 					}
 				}
 				e = dst.PutCheckpointHAS(ix, has)
-				if e != nil {
-					log.Printf("Error: " + e.Error())
-					atomic.AddUint32(&errs, 1)
-				}
+				atomic.AddUint32(&errs, noteError(e))
+
 				for _, cat := range Categories() {
 					pth := CategoryCheckpointPath(cat, ix)
-					if e = copyPath(src, dst, pth); e != nil {
-						log.Printf("Error: " + e.Error())
-						atomic.AddUint32(&errs, 1)
-					}
+					e = copyPath(src, dst, pth)
+					atomic.AddUint32(&errs, noteError(e))
 				}
 				tick <- true
 			}
@@ -306,10 +347,7 @@ func Mirror(src *Archive, dst *Archive, rng Range) error {
 	wg.Wait()
 	close(tick)
 	e = dst.PutRootHAS(rootHAS)
-	if e != nil {
-		log.Printf("Error: " + e.Error())
-		errs += 1
-	}
+	errs += noteError(e)
 	if errs != 0 {
 		return fmt.Errorf("%d errors while mirroring", errs)
 	}
@@ -324,24 +362,18 @@ func Repair(src *Archive, dst *Archive, rng Range) error {
 	rng = rng.Clamp(state.Range())
 
 	log.Printf("Starting scan for repair")
-	e = dst.ScanCheckpoints(rng)
-	if e != nil {
-		return e
-	}
+	var errs uint32
+	errs += noteError(dst.ScanCheckpoints(rng))
 
 	log.Printf("Examining checkpoint files for gaps")
 	missingCheckpointFiles := dst.CheckCheckpointFilesMissing(rng)
 
 	repairedHistory := false
-	errs := 0
 	for cat, missing := range missingCheckpointFiles {
 		for _, chk := range missing {
 			pth := CategoryCheckpointPath(cat, chk)
 			log.Printf("Repairing %s", pth)
-			if e = copyPath(src, dst, pth); e != nil {
-				log.Printf("Error: " + e.Error())
-				errs += 1
-			}
+			errs += noteError(copyPath(src, dst, pth))
 			if cat == "history" {
 				repairedHistory = true
 			}
@@ -351,16 +383,10 @@ func Repair(src *Archive, dst *Archive, rng Range) error {
 	if repairedHistory {
 		log.Printf("Re-running checkpoing-file scan, for bucket repair")
 		dst.ClearCachedInfo()
-		e = dst.ScanCheckpoints(rng)
-		log.Printf("Error: " + e.Error())
-		errs += 1
+		errs += noteError(dst.ScanCheckpoints(rng))
 	}
 
-	e = dst.ScanBuckets()
-	if e != nil {
-		log.Printf("Error: " + e.Error())
-		errs += 1
-	}
+	errs += noteError(dst.ScanBuckets())
 
 	log.Printf("Examining buckets referenced by checkpoints")
 	missingBuckets := dst.CheckBucketsMissing()
@@ -368,10 +394,7 @@ func Repair(src *Archive, dst *Archive, rng Range) error {
 	for bkt, _ := range missingBuckets {
 		pth := BucketPath(bkt)
 		log.Printf("Repairing %s", pth)
-		if e = copyPath(src, dst, pth); e != nil {
-			log.Printf("Error: " + e.Error())
-			errs += 1
-		}
+		errs += noteError(copyPath(src, dst, pth))
 	}
 
 	if errs != 0 {
@@ -472,10 +495,7 @@ func (arch *Archive) ScanCheckpoints(rng Range) error {
 					tick <- true
 					arch.NoteCheckpointFile(r.category, n, true)
 				}
-				for e := range es {
-					atomic.AddUint32(&errs, 1)
-					log.Printf("Error: " + e.Error())
-				}
+				atomic.AddUint32(&errs, drainErrors(es))
 			}
 			wg.Done()
 		}()
@@ -587,10 +607,7 @@ func (arch *Archive) ScanBuckets() error {
 					break
 				}
 				has, e := arch.GetCheckpointHAS(ix)
-				if e != nil {
-					log.Printf("Error: " + e.Error())
-					atomic.AddUint32(&errs, 1)
-				}
+				atomic.AddUint32(&errs, noteError(e))
 				for _, bucket := range has.Buckets() {
 					arch.NoteReferencedBucket(bucket)
 				}
