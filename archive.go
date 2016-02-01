@@ -512,11 +512,15 @@ func (arch *Archive) ScanCheckpoints(rng Range) error {
 }
 
 func (arch *Archive) Scan(rng Range) error {
-	e := arch.ScanCheckpoints(rng)
-	if e != nil {
-		return e
+	e1 := arch.ScanCheckpoints(rng)
+	e2 := arch.ScanBuckets()
+	if e1 != nil {
+		return e1
 	}
-	return arch.ScanBuckets()
+	if e2 != nil {
+		return e2
+	}
+	return nil
 }
 
 func (arch *Archive) CheckCheckpointFilesMissing(rng Range) map[string][]uint32 {

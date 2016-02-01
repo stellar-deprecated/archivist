@@ -32,13 +32,13 @@ func status(a string, opts *Options) {
 func scan(a string, opts *Options) {
 	arch := archivist.MustConnect(a, &opts.ConnectOpts)
 	rng := opts.Range(arch)
-	e := arch.Scan(rng)
-	if e != nil {
-		log.Fatal(e)
+	e1 := arch.Scan(rng)
+	e2 := arch.ReportMissing(rng)
+	if e1 != nil {
+		log.Fatal(e1)
 	}
-	e = arch.ReportMissing(rng)
-	if e != nil {
-		log.Fatal(e)
+	if e2 != nil {
+		log.Fatal(e2)
 	}
 }
 
