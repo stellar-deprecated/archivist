@@ -212,6 +212,20 @@ func copyPath(src *Archive, dst *Archive, pth string) error {
 	return dst.backend.PutFile(pth, rdr)
 }
 
+func makeTicker(onTick func(uint)) chan bool {
+	tick := make(chan bool)
+	go func() {
+		var k uint = 0
+		for range tick {
+			k++
+			if k & 0xfff == 0 {
+				onTick(k)
+			}
+		}
+	}()
+	return tick
+}
+
 func Mirror(src *Archive, dst *Archive, rng Range) error {
 	rootHAS, e := src.GetRootHAS()
 	if e != nil {
@@ -228,20 +242,15 @@ func Mirror(src *Archive, dst *Archive, rng Range) error {
 	var bucketFetchMutex sync.Mutex
 
 	var errs uint32
-	tick := make(chan bool)
-	go func() {
-		k := 0
+	tick := makeTicker(func(ticks uint) {
+		bucketFetchMutex.Lock()
 		sz := rng.Size()
-		for range tick {
-			k++
-			if k & 0xff == 0 {
-				bucketFetchMutex.Lock()
-				log.Printf("Copied %d/%d checkpoints (%f%%), %d buckets",
-					k, sz, 100.0 * float64(k)/float64(sz), len(bucketFetch))
-				bucketFetchMutex.Unlock()
-			}
-		}
-	}()
+		log.Printf("Copied %d/%d checkpoints (%f%%), %d buckets",
+			ticks, sz,
+			100.0 * float64(ticks)/float64(sz),
+			len(bucketFetch))
+		bucketFetchMutex.Unlock()
+	})
 
 
 	var wg sync.WaitGroup
@@ -432,16 +441,9 @@ func (arch *Archive) ScanCheckpoints(rng Range) error {
 	log.Printf("Scanning checkpoint files in range: %s", rng)
 
 	var errs uint32
-	tick := make(chan bool)
-	go func() {
-		k := 0
-		for range tick {
-			k++
-			if k & 0xfff == 0 {
-				arch.ReportCheckpointStats()
-			}
-		}
-	}()
+	tick := makeTicker(func(_ uint){
+		arch.ReportCheckpointStats()
+	})
 
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
@@ -547,17 +549,9 @@ func (arch *Archive) ScanBuckets() error {
 	var wg sync.WaitGroup
 	wg.Add(concurrency + 1)
 
-	tick := make(chan bool)
-	go func() {
-		k := 0
-		for range tick {
-			k++
-			if k & 0xfff == 0 {
-				arch.ReportBucketStats()
-			}
-		}
-	}()
-
+	tick := makeTicker(func(_ uint){
+		arch.ReportBucketStats()
+	})
 	// Start a goroutine listing all the buckets in the archive.
 	// This is lengthy, but it's generally much faster than
 	// doing thousands of individual bucket probes.
