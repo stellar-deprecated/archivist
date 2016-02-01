@@ -48,19 +48,25 @@ func (b *FsArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
 	return e
 }
 
-func (b *FsArchiveBackend) ListFiles(pth string) (chan string, error) {
 	ch := make(chan string, 1000)
+func (b *FsArchiveBackend) ListFiles(pth string) (chan string, chan error) {
+	errs := make(chan error)
 	go func() {
 		filepath.Walk(path.Join(b.prefix, pth),
 			func(p string, info os.FileInfo, err error) error {
+				if err != nil {
+					errs <- err
+					return nil
+				}
 				if info != nil && ! info.IsDir() {
 					ch <- p
 				}
 				return nil
 			})
 		close(ch)
+		close(errs)
 	}()
-	return ch, nil
+	return ch, errs
 }
 
 func MakeFsBackend(pth string) ArchiveBackend {

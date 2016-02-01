@@ -41,9 +41,10 @@ func (b *S3ArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
 	return err
 }
 
-func (b *S3ArchiveBackend) ListFiles(pth string) (chan string, error) {
+func (b *S3ArchiveBackend) ListFiles(pth string) (chan string, chan error) {
 	prefix := path.Join(b.prefix, pth)
 	ch := make(chan string, 1000)
+	errs := make(chan error)
 
 	params := &s3.ListObjectsInput{
 		Bucket: aws.String(b.bucket),
@@ -52,7 +53,9 @@ func (b *S3ArchiveBackend) ListFiles(pth string) (chan string, error) {
 	}
 	resp, err := b.svc.ListObjects(params)
 	if err != nil {
-		return nil, err
+		errs <- err
+		close(ch)
+		return ch, errs
 	}
 	go func() {
 		for {
@@ -63,7 +66,7 @@ func (b *S3ArchiveBackend) ListFiles(pth string) (chan string, error) {
 			if *resp.IsTruncated {
 				resp, err = b.svc.ListObjects(params)
 				if err != nil {
-					break;
+					errs <- err
 				}
 			} else {
 				break
@@ -71,7 +74,7 @@ func (b *S3ArchiveBackend) ListFiles(pth string) (chan string, error) {
 		}
 		close(ch)
 	}()
-	return ch, nil
+	return ch, errs
 }
 
 func MakeS3Backend(bucket string, prefix string, opts *ConnectOptions) ArchiveBackend {

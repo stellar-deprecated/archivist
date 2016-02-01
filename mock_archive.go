@@ -38,10 +38,11 @@ func (b *MockArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
 	return nil
 }
 
-func (b *MockArchiveBackend) ListFiles(pth string) (chan string, error) {
+func (b *MockArchiveBackend) ListFiles(pth string) (chan string, chan error) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	ch := make(chan string, 1000)
+	errs := make(chan error)
 	files := make([]string, 0, len(b.files))
 	for k, _ := range b.files {
 		files = append(files, k)
@@ -51,8 +52,9 @@ func (b *MockArchiveBackend) ListFiles(pth string) (chan string, error) {
 			ch <- f
 		}
 		close(ch)
+		close(errs)
 	}()
-	return ch, nil
+	return ch, errs
 }
 
 func MakeMockBackend() ArchiveBackend {

@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"strings"
 )
 
@@ -31,7 +32,7 @@ type ConnectOptions struct {
 type ArchiveBackend interface {
 	GetFile(path string) (io.ReadCloser, error)
 	PutFile(path string, in io.ReadCloser) error
-	ListFiles(path string) (chan string, error)
+	ListFiles(path string) (chan string, chan error)
 }
 
 func Categories() []string {
@@ -106,20 +107,17 @@ func (a *Archive) PutRootHAS(has HistoryArchiveState) error {
 	return a.PutPathHAS(rootHASPath, has)
 }
 
-func (a *Archive) ListBucket(dp DirPrefix) (chan string, error) {
+func (a *Archive) ListBucket(dp DirPrefix) (chan string, chan error) {
 	return a.backend.ListFiles(path.Join("bucket", dp.Path()))
 }
 
-func (a *Archive) ListAllBuckets() (chan string, error) {
+func (a *Archive) ListAllBuckets() (chan string, chan error) {
 	return a.backend.ListFiles("bucket")
 }
 
-func (a *Archive) ListAllBucketHashes() (chan Hash, error) {
-	sch, err := a.backend.ListFiles("bucket")
-	if err != nil {
-		return nil, err
-	}
 	ch := make(chan Hash, 1000)
+func (a *Archive) ListAllBucketHashes() (chan Hash, chan error) {
+	sch, errs := a.backend.ListFiles("bucket")
 	rx := regexp.MustCompile("bucket" + hexPrefixPat + "bucket-([0-9a-f]{64})\\.xdr\\.gz$")
 	go func() {
 		for s := range sch {
@@ -130,18 +128,25 @@ func (a *Archive) ListAllBucketHashes() (chan Hash, error) {
 		}
 		close(ch)
 	}()
-	return ch, nil
+	return ch, errs
 }
 
-func (a *Archive) ListCategoryCheckpoints(cat string, pth string) (chan uint32, error) {
+func (a *Archive) ListCategoryCheckpoints(cat string, pth string) (chan uint32, chan error) {
 	ext := categoryExt(cat)
 	rx := regexp.MustCompile(cat + hexPrefixPat + cat +
 		"-([0-9a-f]{8})\\." + regexp.QuoteMeta(ext) + "$")
-	sch, err := a.backend.ListFiles(path.Join(cat, pth))
-	if err != nil {
-		return nil, err
-	}
 	ch := make(chan uint32, 1000)
+	sch, errs := a.backend.ListFiles(path.Join(cat, pth))
+	errch := make(chan error)
+
+	// Need a separate pump on the error channel to ensure upstream progress. Don't roll
+	// your eyes. I know, I know.
+	go func() {
+		for e := range errs {
+			errch <- e
+		}
+	}()
+
 	go func() {
 		for s := range sch {
 			m := rx.FindStringSubmatch(s)
@@ -149,12 +154,14 @@ func (a *Archive) ListCategoryCheckpoints(cat string, pth string) (chan uint32, 
 				i, e := strconv.ParseUint(m[1], 16, 32)
 				if e == nil {
 					ch <- uint32(i)
+				} else {
+					errs <- errors.New("decoding checkpoint number in filename " + s)
 				}
 			}
 		}
 		close(ch)
 	}()
-	return ch, nil
+	return ch, errs
 }
 
 func Connect(u string, opts *ConnectOptions) (*Archive, error) {
@@ -219,6 +226,7 @@ func Mirror(src *Archive, dst *Archive, rng Range) error {
 	bucketFetch := make(map[Hash]bool)
 	var bucketFetchMutex sync.Mutex
 
+	var errs uint32
 	tick := make(chan bool)
 	go func() {
 		k := 0
@@ -247,7 +255,9 @@ func Mirror(src *Archive, dst *Archive, rng Range) error {
 				}
 				has, e := src.GetCheckpointHAS(ix)
 				if e != nil {
-					log.Fatal(e)
+					log.Printf("Error: " + e.Error())
+					atomic.AddUint32(&errs, 1)
+					continue
 				}
 				for _, bucket := range has.Buckets() {
 					alreadyFetching := false
@@ -260,18 +270,21 @@ func Mirror(src *Archive, dst *Archive, rng Range) error {
 					if !alreadyFetching {
 						pth := BucketPath(bucket)
 						if e = copyPath(src, dst, pth); e != nil {
-							log.Fatal(e)
+							log.Printf("Error: " + e.Error())
+							atomic.AddUint32(&errs, 1)
 						}
 					}
 				}
 				e = dst.PutCheckpointHAS(ix, has)
 				if e != nil {
-					log.Fatal(e)
+					log.Printf("Error: " + e.Error())
+					atomic.AddUint32(&errs, 1)
 				}
 				for _, cat := range Categories() {
 					pth := CategoryCheckpointPath(cat, ix)
 					if e = copyPath(src, dst, pth); e != nil {
-						log.Fatal(e)
+						log.Printf("Error: " + e.Error())
+						atomic.AddUint32(&errs, 1)
 					}
 				}
 				tick <- true
@@ -281,9 +294,16 @@ func Mirror(src *Archive, dst *Archive, rng Range) error {
 	}
 
 	wg.Wait()
-	e = dst.PutRootHAS(rootHAS)
 	close(tick)
-	return e
+	e = dst.PutRootHAS(rootHAS)
+	if e != nil {
+		log.Printf("Error: " + e.Error())
+		errs += 1
+	}
+	if errs != 0 {
+		return fmt.Errorf("%d errors while mirroring", errs)
+	}
+	return nil
 }
 
 func Repair(src *Archive, dst *Archive, rng Range) error {
@@ -303,12 +323,14 @@ func Repair(src *Archive, dst *Archive, rng Range) error {
 	missingCheckpointFiles := dst.CheckCheckpointFilesMissing(rng)
 
 	repairedHistory := false
+	errs := 0
 	for cat, missing := range missingCheckpointFiles {
 		for _, chk := range missing {
 			pth := CategoryCheckpointPath(cat, chk)
 			log.Printf("Repairing %s", pth)
 			if e = copyPath(src, dst, pth); e != nil {
-				log.Fatal(e)
+				log.Printf("Error: " + e.Error())
+				errs += 1
 			}
 			if cat == "history" {
 				repairedHistory = true
@@ -320,28 +342,31 @@ func Repair(src *Archive, dst *Archive, rng Range) error {
 		log.Printf("Re-running checkpoing-file scan, for bucket repair")
 		dst.ClearCachedInfo()
 		e = dst.ScanCheckpoints(rng)
-		if e != nil {
-			return e
-		}
+		log.Printf("Error: " + e.Error())
+		errs += 1
 	}
 
 	e = dst.ScanBuckets()
 	if e != nil {
-		return e
+		log.Printf("Error: " + e.Error())
+		errs += 1
 	}
 
 	log.Printf("Examining buckets referenced by checkpoints")
 	missingBuckets := dst.CheckBucketsMissing()
 
-
 	for bkt, _ := range missingBuckets {
 		pth := BucketPath(bkt)
 		log.Printf("Repairing %s", pth)
 		if e = copyPath(src, dst, pth); e != nil {
-			log.Fatal(e)
+			log.Printf("Error: " + e.Error())
+			errs += 1
 		}
 	}
 
+	if errs != 0 {
+		return fmt.Errorf("%d errors while repairing", errs)
+	}
 	return nil
 }
 
@@ -405,7 +430,7 @@ func (arch *Archive) ScanCheckpoints(rng Range) error {
 
 	log.Printf("Scanning checkpoint files in range: %s", rng)
 
-	errs := make(chan error, 10000)
+	var errs uint32
 	tick := make(chan bool)
 	go func() {
 		k := 0
@@ -439,11 +464,14 @@ func (arch *Archive) ScanCheckpoints(rng Range) error {
 				if !ok {
 					break
 				}
-				ch, e := arch.ListCategoryCheckpoints(r.category, r.pathprefix)
-				errs <- e
+				ch, es := arch.ListCategoryCheckpoints(r.category, r.pathprefix)
 				for n := range ch {
 					tick <- true
 					arch.NoteCheckpointFile(r.category, n, true)
+				}
+				for e := range es {
+					atomic.AddUint32(&errs, 1)
+					log.Printf("Error: " + e.Error())
 				}
 			}
 			wg.Done()
@@ -452,13 +480,10 @@ func (arch *Archive) ScanCheckpoints(rng Range) error {
 
 	wg.Wait()
 	close(tick)
-	log.Printf("Checkpoint files scanned")
-	close(errs)
+	log.Printf("Checkpoint files scanned with %d errors", errs)
 	arch.ReportCheckpointStats()
-	for e := range errs {
-		if e != nil {
-			return e
-		}
+	if errs != 0 {
+		return fmt.Errorf("%d errors scanning checkpoints", errs)
 	}
 	return nil
 }
@@ -535,15 +560,16 @@ func (arch *Archive) ScanBuckets() error {
 	// Start a goroutine listing all the buckets in the archive.
 	// This is lengthy, but it's generally much faster than
 	// doing thousands of individual bucket probes.
-	allBuckets, e := arch.ListAllBucketHashes()
-	if e != nil {
-		close(tick)
-		return e
-	}
+	var errs uint32
+	allBuckets, ech := arch.ListAllBucketHashes()
 	go func() {
 		for b := range allBuckets {
 			arch.NoteExistingBucket(b)
 			tick <- true
+		}
+		for e := range ech {
+			log.Printf("Error: " + e.Error())
+			atomic.AddUint32(&errs, 1)
 		}
 		wg.Done()
 	}()
@@ -567,7 +593,8 @@ func (arch *Archive) ScanBuckets() error {
 				}
 				has, e := arch.GetCheckpointHAS(ix)
 				if e != nil {
-					log.Fatal(e)
+					log.Printf("Error: " + e.Error())
+					atomic.AddUint32(&errs, 1)
 				}
 				for _, bucket := range has.Buckets() {
 					arch.NoteReferencedBucket(bucket)
@@ -581,6 +608,9 @@ func (arch *Archive) ScanBuckets() error {
 	wg.Wait()
 	arch.ReportBucketStats()
 	close(tick)
+	if errs != 0 {
+		return fmt.Errorf("%d errors while scanning buckets", errs)
+	}
 	return nil
 }
 
