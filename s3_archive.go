@@ -7,6 +7,7 @@ package archivist
 import (
 	"io"
 	"path"
+	"log"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -16,6 +17,7 @@ type S3ArchiveBackend struct {
 	svc *s3.S3
 	bucket string
 	prefix string
+	dryrun bool
 }
 
 func (b *S3ArchiveBackend) GetFile(pth string) (io.ReadCloser, error) {
@@ -31,6 +33,11 @@ func (b *S3ArchiveBackend) GetFile(pth string) (io.ReadCloser, error) {
 }
 
 func (b *S3ArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
+	if b.dryrun {
+		log.Printf("dryrun: put file %s", pth)
+		in.Close()
+		return nil
+	}
 	params := &s3.PutObjectInput{
 		Bucket: aws.String(b.bucket),
 		Key: aws.String(path.Join(b.prefix, pth)),
@@ -87,5 +94,6 @@ func MakeS3Backend(bucket string, prefix string, opts *ConnectOptions) ArchiveBa
 		svc: s3.New(sess),
 		bucket: bucket,
 		prefix: prefix,
+		dryrun: opts.DryRun,
 	}
 }

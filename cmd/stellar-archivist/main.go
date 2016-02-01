@@ -118,9 +118,9 @@ func main() {
 			Destination: &opts.ConnectOpts.S3Region,
 		},
 		&cli.BoolFlag{
-			Name: "force",
-			Usage: "overwrite files even if they exist",
-			Destination: &opts.Force,
+			Name: "dryrun, n",
+			Usage: "describe file-writes, but do not perform any",
+			Destination: &opts.ConnectOpts.DryRun,
 		},
 	}
 	app.Commands = []cli.Command{

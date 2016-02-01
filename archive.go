@@ -27,6 +27,7 @@ const concurrency = 32
 
 type ConnectOptions struct {
 	S3Region string
+	DryRun bool
 }
 
 type ArchiveBackend interface {
@@ -186,9 +187,9 @@ func Connect(u string, opts *ConnectOptions) (*Archive, error) {
 		arch.backend = MakeS3Backend(parsed.Host, pth, opts)
 	} else if parsed.Scheme == "file" {
 		pth = path.Join(parsed.Host, pth)
-		arch.backend = MakeFsBackend(pth)
+		arch.backend = MakeFsBackend(pth, opts)
 	} else if parsed.Scheme == "mock" {
-		arch.backend = MakeMockBackend()
+		arch.backend = MakeMockBackend(opts)
 	} else {
 		err = errors.New("unknown URL scheme: '" + parsed.Scheme + "'")
 	}

@@ -10,16 +10,19 @@ import (
 	"io/ioutil"
 	"errors"
 	"sync"
+	"log"
 )
 
 type MockArchiveBackend struct {
 	mutex sync.Mutex
 	files map[string][]byte
+	dryrun bool
 }
 
 func (b *MockArchiveBackend) GetFile(pth string) (io.ReadCloser, error) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
+	var buf []byte
 	buf, ok := b.files[pth]
 	if !ok {
 		return nil, errors.New("no such file: " + pth)
@@ -28,6 +31,11 @@ func (b *MockArchiveBackend) GetFile(pth string) (io.ReadCloser, error) {
 }
 
 func (b *MockArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
+	if b.dryrun {
+		log.Printf("dryrun: put file %s", pth)
+		in.Close()
+		return nil
+	}
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	buf, e := ioutil.ReadAll(in)
@@ -57,8 +65,9 @@ func (b *MockArchiveBackend) ListFiles(pth string) (chan string, chan error) {
 	return ch, errs
 }
 
-func MakeMockBackend() ArchiveBackend {
+func MakeMockBackend(opts *ConnectOptions) ArchiveBackend {
 	b := new(MockArchiveBackend)
 	b.files = make(map[string][]byte)
+	b.dryrun = opts.DryRun
 	return b
 }

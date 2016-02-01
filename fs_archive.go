@@ -9,10 +9,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"log"
 )
 
 type FsArchiveBackend struct {
 	prefix string
+	dryrun bool
 }
 
 func (b *FsArchiveBackend) GetFile(pth string) (io.ReadCloser, error) {
@@ -27,6 +29,11 @@ func exists(path string) (bool, error) {
 }
 
 func (b *FsArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
+	if b.dryrun {
+		log.Printf("dryrun: put file %s", pth)
+		in.Close()
+		return nil
+	}
 	pth = path.Join(b.prefix, pth)
 	dir := path.Dir(pth)
 	ex, e := exists(dir)
@@ -69,8 +76,9 @@ func (b *FsArchiveBackend) ListFiles(pth string) (chan string, chan error) {
 	return ch, errs
 }
 
-func MakeFsBackend(pth string) ArchiveBackend {
+func MakeFsBackend(pth string, opts *ConnectOptions) ArchiveBackend {
 	return &FsArchiveBackend{
 		prefix: pth,
+		dryrun: opts.DryRun,
 	}
 }
