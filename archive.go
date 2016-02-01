@@ -549,9 +549,35 @@ func (arch* Archive) CheckBucketsMissing() map[Hash]bool {
 	return missing
 }
 
+func (arch *Archive) ScanAllBuckets() error {
+	log.Printf("Scanning all buckets, and those referenced by range")
+
+	tick := makeTicker(func(_ uint){
+		arch.ReportBucketStats()
+	})
+
+	allBuckets, ech := arch.ListAllBucketHashes()
+
+	for b := range allBuckets {
+		arch.NoteExistingBucket(b)
+		tick <- true
+	}
+
+	errs := drainErrors(ech)
+	if errs != 0 {
+		return fmt.Errorf("%d errors while scanning all buckets", errs)
+	}
+	return nil
+}
+
 func (arch *Archive) ScanBuckets() error {
 
-	// Extract the set of checkpoints we have HASs for, to scan.
+	var errs uint32
+
+	// First scan _all_ buckets
+	errs += noteError(arch.ScanAllBuckets())
+
+	// Grab the set of checkpoints we have HASs for, to read references.
 	arch.mutex.Lock()
 	hists := arch.checkpointFiles["history"]
 	seqs := make([]uint32, 0, len(hists))
@@ -562,33 +588,12 @@ func (arch *Archive) ScanBuckets() error {
 	}
 	arch.mutex.Unlock()
 
-	log.Printf("Scanning all buckets, and those referenced by range")
-
-	// We're going to wait on 1 GR for all-bucket-listing +
-	// 'concurrency' GRs for reading HAS files for referenced buckets
 	var wg sync.WaitGroup
-	wg.Add(concurrency + 1)
+	wg.Add(concurrency)
 
 	tick := makeTicker(func(_ uint){
 		arch.ReportBucketStats()
 	})
-	// Start a goroutine listing all the buckets in the archive.
-	// This is lengthy, but it's generally much faster than
-	// doing thousands of individual bucket probes.
-	var errs uint32
-	allBuckets, ech := arch.ListAllBucketHashes()
-	go func() {
-		for b := range allBuckets {
-			arch.NoteExistingBucket(b)
-			tick <- true
-		}
-		for e := range ech {
-			log.Printf("Error: " + e.Error())
-			atomic.AddUint32(&errs, 1)
-		}
-		wg.Done()
-	}()
-
 
 	// Make a bunch of goroutines that pull each HAS and enumerate
 	// its buckets into a channel. These are the _referenced_ buckets.
