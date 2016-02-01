@@ -219,6 +219,9 @@ func Connect(u string, opts *ConnectOptions) (*Archive, error) {
 		allBuckets:make(map[Hash]bool),
 		referencedBuckets:make(map[Hash]bool),
 	}
+	if opts == nil {
+		opts = new(ConnectOptions)
+	}
 	for _, cat := range Categories() {
 		arch.checkpointFiles[cat] = make(map[uint32]bool)
 	}
