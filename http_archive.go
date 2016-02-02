@@ -30,8 +30,8 @@ func (b *HttpArchiveBackend) GetFile(pth string) (io.ReadCloser, error) {
 func (b *HttpArchiveBackend) Exists(pth string) bool {
 	var derived url.URL = b.base
 	derived.Path = path.Join(derived.Path, pth)
-	resp, err := b.client.Get(derived.String())
-	return err != nil && resp.StatusCode >= 200 && resp.StatusCode < 400
+	resp, err := b.client.Head(derived.String())
+	return err == nil && resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 400
 }
 
 func (b *HttpArchiveBackend) PutFile(pth string, in io.ReadCloser) error {

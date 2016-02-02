@@ -44,6 +44,7 @@ func (opts *Options) SetRange(arch *archivist.Archive) {
 			low := state.CurrentLedger - uint32(opts.Last)
 			opts.CommandOpts.Range =
 				archivist.MakeRange(low, state.CurrentLedger)
+			return
 		}
 	}
 	opts.CommandOpts.Range =

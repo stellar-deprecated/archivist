@@ -103,6 +103,14 @@ func BucketPath(bucket Hash) string {
 	return path.Join("bucket", pre.Path(), fmt.Sprintf("bucket-%s.xdr.gz", bucket))
 }
 
+func (a *Archive) BucketExists(bucket Hash) bool {
+	return a.backend.Exists(BucketPath(bucket))
+}
+
+func (a *Archive) CategoryCheckpointExists(cat string, chk uint32) bool {
+	return a.backend.Exists(CategoryCheckpointPath(cat, chk))
+}
+
 func (a *Archive) GetRootHAS() (HistoryArchiveState, error) {
 	return a.GetPathHAS(rootHASPath)
 }
@@ -478,9 +486,14 @@ func (arch *Archive) NoteReferencedBucket(bucket Hash) {
 	arch.referencedBuckets[bucket] = true
 }
 
-type scanCheckpointReq struct {
+type scanCheckpointFastReq struct {
 	category string
 	pathprefix string
+}
+
+type scanCheckpointSlowReq struct {
+	category string
+	checkpoint uint32
 }
 
 func (arch *Archive) ScanCheckpoints(opts *CommandOptions) error {
@@ -492,6 +505,14 @@ func (arch *Archive) ScanCheckpoints(opts *CommandOptions) error {
 
 	log.Printf("Scanning checkpoint files in range: %s", opts.Range)
 
+	if arch.backend.CanListFiles() {
+		return arch.ScanCheckpointsFast(opts)
+	} else {
+		return arch.ScanCheckpointsSlow(opts)
+	}
+}
+
+func (arch *Archive) ScanCheckpointsSlow(opts *CommandOptions) error {
 	var errs uint32
 	tick := makeTicker(func(_ uint){
 		arch.ReportCheckpointStats()
@@ -500,13 +521,61 @@ func (arch *Archive) ScanCheckpoints(opts *CommandOptions) error {
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 
-	req := make(chan scanCheckpointReq)
+	req := make(chan scanCheckpointSlowReq)
+
+	cats := Categories()
+	go func() {
+		for _, cat := range cats {
+			for chk := range opts.Range.Checkpoints() {
+				req <- scanCheckpointSlowReq{category:cat, checkpoint:chk}
+			}
+		}
+		close(req)
+	}()
+
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			for {
+				r, ok := <-req
+				if !ok {
+					break
+				}
+				exists := arch.CategoryCheckpointExists(r.category, r.checkpoint)
+				tick <- true
+				arch.NoteCheckpointFile(r.category, r.checkpoint, exists)
+			}
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+	close(tick)
+	log.Printf("Checkpoint files scanned with %d errors", errs)
+	arch.ReportCheckpointStats()
+	if errs != 0 {
+		return fmt.Errorf("%d errors scanning checkpoints", errs)
+	}
+	return nil
+}
+
+
+func (arch *Archive) ScanCheckpointsFast(opts *CommandOptions) error {
+
+	var errs uint32
+	tick := makeTicker(func(_ uint){
+		arch.ReportCheckpointStats()
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+
+	req := make(chan scanCheckpointFastReq)
 
 	cats := Categories()
 	go func() {
 		for _, cat := range cats {
 			for _, pth := range RangePaths(opts.Range) {
-				req <- scanCheckpointReq{category:cat, pathprefix:pth}
+				req <- scanCheckpointFastReq{category:cat, pathprefix:pth}
 			}
 		}
 		close(req)
@@ -607,8 +676,12 @@ func (arch *Archive) ScanBuckets() error {
 
 	var errs uint32
 
-	// First scan _all_ buckets
-	errs += noteError(arch.ScanAllBuckets())
+	// First scan _all_ buckets if we can; if not, we'll do an exists-check
+	// on each bucket as we go. But this is faster when we can do it.
+	doList := arch.backend.CanListFiles()
+	if doList {
+		errs += noteError(arch.ScanAllBuckets())
+	}
 
 	// Grab the set of checkpoints we have HASs for, to read references.
 	arch.mutex.Lock()
@@ -648,6 +721,11 @@ func (arch *Archive) ScanBuckets() error {
 				atomic.AddUint32(&errs, noteError(e))
 				for _, bucket := range has.Buckets() {
 					arch.NoteReferencedBucket(bucket)
+					if !doList {
+						if arch.BucketExists(bucket) {
+							arch.NoteExistingBucket(bucket)
+						}
+					}
 				}
 				tick <- true
 			}
@@ -665,12 +743,6 @@ func (arch *Archive) ScanBuckets() error {
 }
 
 func (arch *Archive) ReportMissing(opts *CommandOptions) error {
-
-	state, e := arch.GetRootHAS()
-	if e != nil {
-		return e
-	}
-	opts.Range = opts.Range.Clamp(state.Range())
 
 	log.Printf("Examining checkpoint files for gaps")
 	missingCheckpointFiles := arch.CheckCheckpointFilesMissing(opts)
