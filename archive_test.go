@@ -13,6 +13,7 @@ import (
 	"io/ioutil"
 	"os"
 	"math/big"
+	"github.com/stretchr/testify/assert"
 )
 
 func GetTestS3Archive() *Archive {
@@ -29,12 +30,25 @@ func GetTestMockArchive() *Archive {
 	return MustConnect("mock://test", nil)
 }
 
+var tmpdirs []string
+
 func GetTestFileArchive() *Archive {
 	d, e := ioutil.TempDir("/tmp", "archivist")
 	if e != nil {
 		panic(e)
 	}
+	if tmpdirs == nil {
+		tmpdirs = []string{d}
+	} else {
+		tmpdirs = append(tmpdirs, d)
+	}
 	return MustConnect("file://" + d, nil)
+}
+
+func cleanup() {
+	for _, d := range tmpdirs {
+		os.RemoveAll(d)
+	}
 }
 
 func GetTestArchive() *Archive {
@@ -123,14 +137,68 @@ func GetRandomPopulatedArchive() *Archive {
 }
 
 func TestScan(t *testing.T) {
+	defer cleanup()
 	opts := &CommandOptions{Range:testRange()}
 	GetRandomPopulatedArchive().Scan(opts)
 }
 
+func countMissing(arch *Archive, opts *CommandOptions) int {
+	n := 0
+	arch.Scan(opts)
+	for _, missing := range arch.CheckCheckpointFilesMissing(opts) {
+		n += len(missing)
+	}
+	n += len(arch.CheckBucketsMissing())
+	return n
+}
+
 func TestMirror(t *testing.T) {
+	defer cleanup()
 	opts := &CommandOptions{Range:testRange()}
 	src := GetRandomPopulatedArchive()
 	dst := GetTestArchive()
 	Mirror(src, dst, opts)
+	assert.Equal(t, 0, countMissing(dst, opts))
 }
 
+func copyFile(category string, checkpoint uint32, src *Archive, dst *Archive) {
+	pth := CategoryCheckpointPath(category, checkpoint)
+	rdr, err := src.backend.GetFile(pth)
+	if err != nil {
+		panic(err)
+	}
+	if err = dst.backend.PutFile(pth, rdr); err != nil {
+		panic(err)
+	}
+}
+
+func TestMirrorThenRepair(t *testing.T) {
+	defer cleanup()
+	opts := &CommandOptions{Range:testRange()}
+	src := GetRandomPopulatedArchive()
+	dst := GetTestArchive()
+	Mirror(src, dst, opts)
+	assert.Equal(t, 0, countMissing(dst, opts))
+	bad := opts.Range.Low + uint32(opts.Range.Size() / 2)
+	src.AddRandomCheckpoint(bad)
+	copyFile("history", bad, src, dst)
+	assert.NotEqual(t, 0, countMissing(dst, opts))
+	Repair(src, dst, opts)
+	assert.Equal(t, 0, countMissing(dst, opts))
+}
+
+func TestDryRunNoRepair(t *testing.T) {
+	defer cleanup()
+	opts := &CommandOptions{Range:testRange()}
+	src := GetRandomPopulatedArchive()
+	dst := GetTestArchive()
+	Mirror(src, dst, opts)
+	assert.Equal(t, 0, countMissing(dst, opts))
+	bad := opts.Range.Low + uint32(opts.Range.Size() / 2)
+	src.AddRandomCheckpoint(bad)
+	copyFile("history", bad, src, dst)
+	assert.NotEqual(t, 0, countMissing(dst, opts))
+	opts.DryRun = true;
+	Repair(src, dst, opts)
+	assert.NotEqual(t, 0, countMissing(dst, opts))
+}
