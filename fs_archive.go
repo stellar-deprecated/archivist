@@ -27,7 +27,7 @@ func (b *FsArchiveBackend) Exists(pth string) bool {
 }
 
 func (b *FsArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
-	dir := path.Dir(pth)
+	dir := path.Join(b.prefix, path.Dir(pth))
 	if !b.Exists(dir) {
 		if e := os.MkdirAll(dir, 0755); e != nil {
 			return e
