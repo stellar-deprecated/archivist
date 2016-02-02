@@ -72,6 +72,7 @@ func (arch *Archive) AddRandomCheckpointFile(cat string, chk uint32) error {
 }
 
 func (arch *Archive) AddRandomCheckpoint(chk uint32) error {
+	opts := &CommandOptions{Force:true}
 	for _, cat := range Categories() {
 		if cat == "history" {
 			var has HistoryArchiveState
@@ -93,8 +94,8 @@ func (arch *Archive) AddRandomCheckpoint(chk uint32) error {
 				has.CurrentBuckets[i].Snap = snap.String()
 				has.CurrentBuckets[i].Next.Output = next.String()
 			}
-			arch.PutCheckpointHAS(chk, has)
-			arch.PutRootHAS(has)
+			arch.PutCheckpointHAS(chk, has, opts)
+			arch.PutRootHAS(has, opts)
 		} else {
 			arch.AddRandomCheckpointFile(cat, chk)
 		}
@@ -122,12 +123,14 @@ func GetRandomPopulatedArchive() *Archive {
 }
 
 func TestScan(t *testing.T) {
-	GetRandomPopulatedArchive().Scan(testRange())
+	opts := &CommandOptions{Range:testRange()}
+	GetRandomPopulatedArchive().Scan(opts)
 }
 
 func TestMirror(t *testing.T) {
+	opts := &CommandOptions{Range:testRange()}
 	src := GetRandomPopulatedArchive()
 	dst := GetTestArchive()
-	Mirror(src, dst, testRange())
+	Mirror(src, dst, opts)
 }
 

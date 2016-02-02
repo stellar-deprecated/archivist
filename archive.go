@@ -358,6 +358,9 @@ func Mirror(src *Archive, dst *Archive, opts *CommandOptions) error {
 				atomic.AddUint32(&errs, noteError(e))
 
 				for _, cat := range Categories() {
+					if cat == "history" {
+						continue
+					}
 					pth := CategoryCheckpointPath(cat, ix)
 					e = copyPath(src, dst, pth, opts)
 					atomic.AddUint32(&errs, noteError(e))
