@@ -6,17 +6,23 @@ package archivist
 
 import (
 	"bytes"
+	"strings"
 	"io"
 	"io/ioutil"
 	"errors"
 	"sync"
-	"log"
 )
 
 type MockArchiveBackend struct {
 	mutex sync.Mutex
 	files map[string][]byte
-	dryrun bool
+}
+
+func (b *MockArchiveBackend) Exists(pth string) bool {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	_, ok := b.files[pth]
+	return ok
 }
 
 func (b *MockArchiveBackend) GetFile(pth string) (io.ReadCloser, error) {
@@ -31,11 +37,6 @@ func (b *MockArchiveBackend) GetFile(pth string) (io.ReadCloser, error) {
 }
 
 func (b *MockArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
-	if b.dryrun {
-		log.Printf("dryrun: put file %s", pth)
-		in.Close()
-		return nil
-	}
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	buf, e := ioutil.ReadAll(in)
@@ -57,7 +58,9 @@ func (b *MockArchiveBackend) ListFiles(pth string) (chan string, chan error) {
 	}
 	go func() {
 		for _, f := range files {
-			ch <- f
+			if strings.HasPrefix(f, pth) {
+				ch <- f
+			}
 		}
 		close(ch)
 		close(errs)
@@ -65,9 +68,12 @@ func (b *MockArchiveBackend) ListFiles(pth string) (chan string, chan error) {
 	return ch, errs
 }
 
+func (b *MockArchiveBackend) CanListFiles() bool {
+	return true
+}
+
 func MakeMockBackend(opts *ConnectOptions) ArchiveBackend {
 	b := new(MockArchiveBackend)
 	b.files = make(map[string][]byte)
-	b.dryrun = opts.DryRun
 	return b
 }

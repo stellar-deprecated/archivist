@@ -25,15 +25,22 @@ const hexPrefixPat = "/[0-9a-f]{2}/[0-9a-f]{2}/[0-9a-f]{2}/"
 const rootHASPath = ".well-known/stellar-history.json"
 const concurrency = 32
 
+type CommandOptions struct {
+	Range Range
+	DryRun bool
+	Force bool
+}
+
 type ConnectOptions struct {
 	S3Region string
-	DryRun bool
 }
 
 type ArchiveBackend interface {
+	Exists(path string) bool
 	GetFile(path string) (io.ReadCloser, error)
 	PutFile(path string, in io.ReadCloser) error
 	ListFiles(path string) (chan string, chan error)
+	CanListFiles() bool
 }
 
 func Categories() []string {
@@ -72,7 +79,11 @@ func (a *Archive) GetPathHAS(path string) (HistoryArchiveState, error) {
 	return has, err
 }
 
-func (a *Archive) PutPathHAS(path string, has HistoryArchiveState) error {
+func (a *Archive) PutPathHAS(path string, has HistoryArchiveState, opts *CommandOptions) error {
+	if a.backend.Exists(path) && !opts.Force {
+		log.Printf("skipping existing " + path)
+		return nil
+	}
 	buf, err := json.MarshalIndent(has, "", "    ")
 	if err != nil {
 		return err
@@ -100,12 +111,12 @@ func (a *Archive) GetCheckpointHAS(chk uint32) (HistoryArchiveState, error) {
 	return a.GetPathHAS(CategoryCheckpointPath("history", chk))
 }
 
-func (a *Archive) PutCheckpointHAS(chk uint32, has HistoryArchiveState) error {
-	return a.PutPathHAS(CategoryCheckpointPath("history", chk), has)
+func (a *Archive) PutCheckpointHAS(chk uint32, has HistoryArchiveState, opts *CommandOptions) error {
+	return a.PutPathHAS(CategoryCheckpointPath("history", chk), has, opts)
 }
 
-func (a *Archive) PutRootHAS(has HistoryArchiveState) error {
-	return a.PutPathHAS(rootHASPath, has)
+func (a *Archive) PutRootHAS(has HistoryArchiveState, opts *CommandOptions) error {
+	return a.PutPathHAS(rootHASPath, has, opts)
 }
 
 func (a *Archive) ListBucket(dp DirPrefix) (chan string, chan error) {
@@ -255,7 +266,15 @@ func MustConnect(u string, opts *ConnectOptions) *Archive {
 	return arch
 }
 
-func copyPath(src *Archive, dst *Archive, pth string) error {
+func copyPath(src *Archive, dst *Archive, pth string, opts *CommandOptions) error {
+	if opts.DryRun {
+		log.Printf("dryrun skipping " + pth)
+		return nil
+	}
+	if dst.backend.Exists(pth) && !opts.Force {
+		log.Printf("skipping existing " + pth)
+		return nil
+	}
 	rdr, err := src.backend.GetFile(pth)
 	if err != nil {
 		return err
@@ -277,15 +296,15 @@ func makeTicker(onTick func(uint)) chan bool {
 	return tick
 }
 
-func Mirror(src *Archive, dst *Archive, rng Range) error {
+func Mirror(src *Archive, dst *Archive, opts *CommandOptions) error {
 	rootHAS, e := src.GetRootHAS()
 	if e != nil {
 		return e
 	}
 
-	rng = rng.Clamp(rootHAS.Range())
+	opts.Range = opts.Range.Clamp(rootHAS.Range())
 
-	log.Printf("copying range %s\n", rng)
+	log.Printf("copying range %s\n", opts.Range)
 
 	// Make a bucket-fetch map that shows which buckets are
 	// already-being-fetched
@@ -295,7 +314,7 @@ func Mirror(src *Archive, dst *Archive, rng Range) error {
 	var errs uint32
 	tick := makeTicker(func(ticks uint) {
 		bucketFetchMutex.Lock()
-		sz := rng.Size()
+		sz := opts.Range.Size()
 		log.Printf("Copied %d/%d checkpoints (%f%%), %d buckets",
 			ticks, sz,
 			100.0 * float64(ticks)/float64(sz),
@@ -305,7 +324,7 @@ func Mirror(src *Archive, dst *Archive, rng Range) error {
 
 
 	var wg sync.WaitGroup
-	checkpoints := rng.Checkpoints()
+	checkpoints := opts.Range.Checkpoints()
 	wg.Add(concurrency)
 	for i := 0; i < concurrency; i++ {
 		go func() {
@@ -329,16 +348,16 @@ func Mirror(src *Archive, dst *Archive, rng Range) error {
 					bucketFetchMutex.Unlock()
 					if !alreadyFetching {
 						pth := BucketPath(bucket)
-						e = copyPath(src, dst, pth)
+						e = copyPath(src, dst, pth, opts)
 						atomic.AddUint32(&errs, noteError(e))
 					}
 				}
-				e = dst.PutCheckpointHAS(ix, has)
+				e = dst.PutCheckpointHAS(ix, has, opts)
 				atomic.AddUint32(&errs, noteError(e))
 
 				for _, cat := range Categories() {
 					pth := CategoryCheckpointPath(cat, ix)
-					e = copyPath(src, dst, pth)
+					e = copyPath(src, dst, pth, opts)
 					atomic.AddUint32(&errs, noteError(e))
 				}
 				tick <- true
@@ -348,8 +367,10 @@ func Mirror(src *Archive, dst *Archive, rng Range) error {
 	}
 
 	wg.Wait()
+	log.Printf("Copied %d checkpoints, %d buckets",
+		opts.Range.Size(), len(bucketFetch))
 	close(tick)
-	e = dst.PutRootHAS(rootHAS)
+	e = dst.PutRootHAS(rootHAS, opts)
 	errs += noteError(e)
 	if errs != 0 {
 		return fmt.Errorf("%d errors while mirroring", errs)
@@ -357,26 +378,26 @@ func Mirror(src *Archive, dst *Archive, rng Range) error {
 	return nil
 }
 
-func Repair(src *Archive, dst *Archive, rng Range) error {
+func Repair(src *Archive, dst *Archive, opts *CommandOptions) error {
 	state, e := dst.GetRootHAS()
 	if e != nil {
 		return e
 	}
-	rng = rng.Clamp(state.Range())
+	opts.Range = opts.Range.Clamp(state.Range())
 
 	log.Printf("Starting scan for repair")
 	var errs uint32
-	errs += noteError(dst.ScanCheckpoints(rng))
+	errs += noteError(dst.ScanCheckpoints(opts))
 
 	log.Printf("Examining checkpoint files for gaps")
-	missingCheckpointFiles := dst.CheckCheckpointFilesMissing(rng)
+	missingCheckpointFiles := dst.CheckCheckpointFilesMissing(opts)
 
 	repairedHistory := false
 	for cat, missing := range missingCheckpointFiles {
 		for _, chk := range missing {
 			pth := CategoryCheckpointPath(cat, chk)
 			log.Printf("Repairing %s", pth)
-			errs += noteError(copyPath(src, dst, pth))
+			errs += noteError(copyPath(src, dst, pth, opts))
 			if cat == "history" {
 				repairedHistory = true
 			}
@@ -386,7 +407,7 @@ func Repair(src *Archive, dst *Archive, rng Range) error {
 	if repairedHistory {
 		log.Printf("Re-running checkpoing-file scan, for bucket repair")
 		dst.ClearCachedInfo()
-		errs += noteError(dst.ScanCheckpoints(rng))
+		errs += noteError(dst.ScanCheckpoints(opts))
 	}
 
 	errs += noteError(dst.ScanBuckets())
@@ -397,7 +418,7 @@ func Repair(src *Archive, dst *Archive, rng Range) error {
 	for bkt, _ := range missingBuckets {
 		pth := BucketPath(bkt)
 		log.Printf("Repairing %s", pth)
-		errs += noteError(copyPath(src, dst, pth))
+		errs += noteError(copyPath(src, dst, pth, opts))
 	}
 
 	if errs != 0 {
@@ -457,14 +478,14 @@ type scanCheckpointReq struct {
 	pathprefix string
 }
 
-func (arch *Archive) ScanCheckpoints(rng Range) error {
+func (arch *Archive) ScanCheckpoints(opts *CommandOptions) error {
 	state, e := arch.GetRootHAS()
 	if e != nil {
 		return e
 	}
-	rng = rng.Clamp(state.Range())
+	opts.Range = opts.Range.Clamp(state.Range())
 
-	log.Printf("Scanning checkpoint files in range: %s", rng)
+	log.Printf("Scanning checkpoint files in range: %s", opts.Range)
 
 	var errs uint32
 	tick := makeTicker(func(_ uint){
@@ -479,7 +500,7 @@ func (arch *Archive) ScanCheckpoints(rng Range) error {
 	cats := Categories()
 	go func() {
 		for _, cat := range cats {
-			for _, pth := range RangePaths(rng) {
+			for _, pth := range RangePaths(opts.Range) {
 				req <- scanCheckpointReq{category:cat, pathprefix:pth}
 			}
 		}
@@ -514,8 +535,8 @@ func (arch *Archive) ScanCheckpoints(rng Range) error {
 	return nil
 }
 
-func (arch *Archive) Scan(rng Range) error {
-	e1 := arch.ScanCheckpoints(rng)
+func (arch *Archive) Scan(opts *CommandOptions) error {
+	e1 := arch.ScanCheckpoints(opts)
 	e2 := arch.ScanBuckets()
 	if e1 != nil {
 		return e1
@@ -526,13 +547,13 @@ func (arch *Archive) Scan(rng Range) error {
 	return nil
 }
 
-func (arch *Archive) CheckCheckpointFilesMissing(rng Range) map[string][]uint32 {
+func (arch *Archive) CheckCheckpointFilesMissing(opts *CommandOptions) map[string][]uint32 {
 	arch.mutex.Lock()
 	defer arch.mutex.Unlock()
 	missing := make(map[string][]uint32)
 	for _, cat := range Categories() {
 		missing[cat] = make([]uint32, 0)
-		for ix := range rng.Checkpoints() {
+		for ix := range opts.Range.Checkpoints() {
 			_, ok := arch.checkpointFiles[cat][ix]
 			if !ok {
 				missing[cat] = append(missing[cat], ix)
@@ -638,16 +659,16 @@ func (arch *Archive) ScanBuckets() error {
 	return nil
 }
 
-func (arch *Archive) ReportMissing(rng Range) error {
+func (arch *Archive) ReportMissing(opts *CommandOptions) error {
 
 	state, e := arch.GetRootHAS()
 	if e != nil {
 		return e
 	}
-	rng = rng.Clamp(state.Range())
+	opts.Range = opts.Range.Clamp(state.Range())
 
 	log.Printf("Examining checkpoint files for gaps")
-	missingCheckpointFiles := arch.CheckCheckpointFilesMissing(rng)
+	missingCheckpointFiles := arch.CheckCheckpointFilesMissing(opts)
 	log.Printf("Examining buckets referenced by checkpoints")
 	missingBuckets := arch.CheckBucketsMissing()
 
@@ -667,7 +688,7 @@ func (arch *Archive) ReportMissing(rng Range) error {
 	}
 
 	if !missingCheckpoints {
-		log.Printf("No checkpoint files missing in range %s", rng)
+		log.Printf("No checkpoint files missing in range %s", opts.Range)
 	}
 
 	for bucket, _ := range missingBuckets {
@@ -675,7 +696,7 @@ func (arch *Archive) ReportMissing(rng Range) error {
 	}
 
 	if len(missingBuckets) == 0 {
-		log.Printf("No missing buckets referenced in range %s", rng)
+		log.Printf("No missing buckets referenced in range %s", opts.Range)
 	}
 
 	return nil

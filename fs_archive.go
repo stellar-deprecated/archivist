@@ -9,42 +9,32 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"log"
 )
 
 type FsArchiveBackend struct {
 	prefix string
-	dryrun bool
 }
 
 func (b *FsArchiveBackend) GetFile(pth string) (io.ReadCloser, error) {
 	return os.Open(path.Join(b.prefix, pth))
 }
 
-func exists(path string) (bool, error) {
-    _, err := os.Stat(path)
-    if err == nil { return true, nil }
-    if os.IsNotExist(err) { return false, nil }
-    return true, err
+func (b *FsArchiveBackend) Exists(pth string) bool {
+	pth = path.Join(b.prefix, pth)
+    _, err := os.Stat(pth)
+    if err != nil && os.IsNotExist(err) { return false }
+    return true
 }
 
 func (b *FsArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
-	if b.dryrun {
-		log.Printf("dryrun: put file %s", pth)
-		in.Close()
-		return nil
-	}
-	pth = path.Join(b.prefix, pth)
 	dir := path.Dir(pth)
-	ex, e := exists(dir)
-	if e != nil {
-		return e
-	}
-	if !ex {
+	if !b.Exists(dir) {
 		if e := os.MkdirAll(dir, 0755); e != nil {
 			return e
 		}
 	}
+
+	pth = path.Join(b.prefix, pth)
 	out, e := os.Create(pth)
 	if e != nil {
 		return e
@@ -76,9 +66,12 @@ func (b *FsArchiveBackend) ListFiles(pth string) (chan string, chan error) {
 	return ch, errs
 }
 
+func (b *FsArchiveBackend) CanListFiles() bool {
+	return true
+}
+
 func MakeFsBackend(pth string, opts *ConnectOptions) ArchiveBackend {
 	return &FsArchiveBackend{
 		prefix: pth,
-		dryrun: opts.DryRun,
 	}
 }

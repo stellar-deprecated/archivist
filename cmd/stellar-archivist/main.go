@@ -29,11 +29,34 @@ func status(a string, opts *Options) {
 	fmt.Printf("\n")
 }
 
+type Options struct {
+	Low int
+	High int
+	Last int
+	CommandOpts archivist.CommandOptions
+	ConnectOpts archivist.ConnectOptions
+}
+
+func (opts *Options) SetRange(arch *archivist.Archive) {
+	if arch != nil && opts.Last != -1 {
+		state, e := arch.GetRootHAS()
+		if e == nil {
+			low := state.CurrentLedger - uint32(opts.Last)
+			opts.CommandOpts.Range =
+				archivist.MakeRange(low, state.CurrentLedger)
+		}
+	}
+	opts.CommandOpts.Range =
+		archivist.MakeRange(uint32(opts.Low),
+		uint32(opts.High))
+
+}
+
 func scan(a string, opts *Options) {
 	arch := archivist.MustConnect(a, &opts.ConnectOpts)
-	rng := opts.Range(arch)
-	e1 := arch.Scan(rng)
-	e2 := arch.ReportMissing(rng)
+	opts.SetRange(arch)
+	e1 := arch.Scan(&opts.CommandOpts)
+	e2 := arch.ReportMissing(&opts.CommandOpts)
 	if e1 != nil {
 		log.Fatal(e1)
 	}
@@ -42,33 +65,12 @@ func scan(a string, opts *Options) {
 	}
 }
 
-type Options struct {
-	Low int
-	High int
-	Last int
-	Force bool
-	ConnectOpts archivist.ConnectOptions
-}
-
-func (opts *Options) Range(arch *archivist.Archive) archivist.Range {
-	if arch != nil && opts.Last != -1 {
-		state, e := arch.GetRootHAS()
-		if e == nil {
-			low := state.CurrentLedger - uint32(opts.Last)
-			return archivist.MakeRange(low, state.CurrentLedger)
-		}
-	}
-	return archivist.MakeRange(uint32(opts.Low),
-		uint32(opts.High))
-
-}
-
 func mirror(src string, dst string, opts *Options) {
 	srcArch := archivist.MustConnect(src, &opts.ConnectOpts)
 	dstArch := archivist.MustConnect(dst, &opts.ConnectOpts)
-	rng := opts.Range(srcArch)
+	opts.SetRange(srcArch)
 	log.Printf("mirroring %v -> %v\n", src, dst)
-	e := archivist.Mirror(srcArch, dstArch, rng)
+	e := archivist.Mirror(srcArch, dstArch, &opts.CommandOpts)
 	if e != nil {
 		log.Fatal(e)
 	}
@@ -77,9 +79,9 @@ func mirror(src string, dst string, opts *Options) {
 func repair(src string, dst string, opts *Options) {
 	srcArch := archivist.MustConnect(src, &opts.ConnectOpts)
 	dstArch := archivist.MustConnect(dst, &opts.ConnectOpts)
-	rng := opts.Range(srcArch)
+	opts.SetRange(srcArch)
 	log.Printf("repairing %v -> %v\n", src, dst)
-	e := archivist.Repair(srcArch, dstArch, rng)
+	e := archivist.Repair(srcArch, dstArch, &opts.CommandOpts)
 	if e != nil {
 		log.Fatal(e)
 	}
@@ -120,7 +122,12 @@ func main() {
 		&cli.BoolFlag{
 			Name: "dryrun, n",
 			Usage: "describe file-writes, but do not perform any",
-			Destination: &opts.ConnectOpts.DryRun,
+			Destination: &opts.CommandOpts.DryRun,
+		},
+		&cli.BoolFlag{
+			Name: "force, f",
+			Usage: "overwrite existing files",
+			Destination: &opts.CommandOpts.Force,
 		},
 	}
 	app.Commands = []cli.Command{

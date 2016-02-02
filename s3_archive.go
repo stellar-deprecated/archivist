@@ -7,7 +7,6 @@ package archivist
 import (
 	"io"
 	"path"
-	"log"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -17,7 +16,6 @@ type S3ArchiveBackend struct {
 	svc *s3.S3
 	bucket string
 	prefix string
-	dryrun bool
 }
 
 func (b *S3ArchiveBackend) GetFile(pth string) (io.ReadCloser, error) {
@@ -32,12 +30,16 @@ func (b *S3ArchiveBackend) GetFile(pth string) (io.ReadCloser, error) {
 	return resp.Body, nil
 }
 
-func (b *S3ArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
-	if b.dryrun {
-		log.Printf("dryrun: put file %s", pth)
-		in.Close()
-		return nil
+func (b *S3ArchiveBackend) Exists(pth string) bool {
+	params := &s3.HeadObjectInput{
+		Bucket: aws.String(b.bucket),
+		Key: aws.String(path.Join(b.prefix, pth)),
 	}
+	_, err := b.svc.HeadObject(params)
+	return err == nil
+}
+
+func (b *S3ArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
 	params := &s3.PutObjectInput{
 		Bucket: aws.String(b.bucket),
 		Key: aws.String(path.Join(b.prefix, pth)),
@@ -84,6 +86,10 @@ func (b *S3ArchiveBackend) ListFiles(pth string) (chan string, chan error) {
 	return ch, errs
 }
 
+func (b *S3ArchiveBackend) CanListFiles() bool {
+	return true
+}
+
 func MakeS3Backend(bucket string, prefix string, opts *ConnectOptions) ArchiveBackend {
 	cfg := aws.Config{}
 	if opts != nil && opts.S3Region != "" {
@@ -94,6 +100,5 @@ func MakeS3Backend(bucket string, prefix string, opts *ConnectOptions) ArchiveBa
 		svc: s3.New(sess),
 		bucket: bucket,
 		prefix: prefix,
-		dryrun: opts.DryRun,
 	}
 }
