@@ -76,6 +76,7 @@ func (a *Archive) GetPathHAS(path string) (HistoryArchiveState, error) {
 	}
 	dec := json.NewDecoder(rdr)
 	err = dec.Decode(&has)
+	rdr.Close()
 	return has, err
 }
 
