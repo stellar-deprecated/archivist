@@ -360,23 +360,3 @@ func (arch *Archive) ReportMissing(opts *CommandOptions) error {
 
 	return nil
 }
-
-func (arch *Archive) ReportInvalid(opts *CommandOptions) error {
-	if !opts.Verify {
-		return nil
-	}
-	arch.mutex.Lock()
-	defer arch.mutex.Unlock()
-	n := 0
-	for eledger, ehash := range arch.expectedLedgerHashes {
-		fhash, ok := arch.foundLedgerHashes[eledger]
-		if ok && fhash != ehash {
-			n++
-			log.Printf("Mismatched hash on ledger %8.8x: expected %s, got %s",
-				eledger, ehash, fhash)
-		}
-	}
-	log.Printf("verified %d ledger headers have expected hashes",
-		len(arch.expectedLedgerHashes) - n)
-	return nil
-}
