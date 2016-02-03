@@ -58,11 +58,15 @@ func scan(a string, opts *Options) {
 	opts.SetRange(arch)
 	e1 := arch.Scan(&opts.CommandOpts)
 	e2 := arch.ReportMissing(&opts.CommandOpts)
+	e3 := arch.ReportInvalid(&opts.CommandOpts)
 	if e1 != nil {
 		log.Fatal(e1)
 	}
 	if e2 != nil {
 		log.Fatal(e2)
+	}
+	if e3 != nil {
+		log.Fatal(e3)
 	}
 }
 
@@ -129,6 +133,11 @@ func main() {
 			Name: "force, f",
 			Usage: "overwrite existing files",
 			Destination: &opts.CommandOpts.Force,
+		},
+		&cli.BoolFlag{
+			Name: "verify",
+			Usage: "verify file contents",
+			Destination: &opts.CommandOpts.Verify,
 		},
 	}
 	app.Commands = []cli.Command{

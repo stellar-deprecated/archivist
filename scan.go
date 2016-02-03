@@ -69,6 +69,11 @@ func (arch *Archive) ScanCheckpointsSlow(opts *CommandOptions) error {
 				exists := arch.CategoryCheckpointExists(r.category, r.checkpoint)
 				tick <- true
 				arch.NoteCheckpointFile(r.category, r.checkpoint, exists)
+				if exists && opts.Verify {
+					atomic.AddUint32(&errs,
+						noteError(arch.VerifyCategoryCheckpoint(r.category,
+							r.checkpoint)))
+				}
 			}
 			wg.Done()
 		}()
@@ -118,6 +123,10 @@ func (arch *Archive) ScanCheckpointsFast(opts *CommandOptions) error {
 				for n := range ch {
 					tick <- true
 					arch.NoteCheckpointFile(r.category, n, true)
+					if opts.Verify {
+						atomic.AddUint32(&errs,
+							noteError(arch.VerifyCategoryCheckpoint(r.category, n)))
+					}
 				}
 				atomic.AddUint32(&errs, drainErrors(es))
 			}
@@ -349,5 +358,25 @@ func (arch *Archive) ReportMissing(opts *CommandOptions) error {
 		log.Printf("No missing buckets referenced in range %s", opts.Range)
 	}
 
+	return nil
+}
+
+func (arch *Archive) ReportInvalid(opts *CommandOptions) error {
+	if !opts.Verify {
+		return nil
+	}
+	arch.mutex.Lock()
+	defer arch.mutex.Unlock()
+	n := 0
+	for eledger, ehash := range arch.expectedLedgerHashes {
+		fhash, ok := arch.foundLedgerHashes[eledger]
+		if ok && fhash != ehash {
+			n++
+			log.Printf("Mismatched hash on ledger %8.8x: expected %s, got %s",
+				eledger, ehash, fhash)
+		}
+	}
+	log.Printf("verified %d ledger headers have expected hashes",
+		len(arch.expectedLedgerHashes) - n)
 	return nil
 }

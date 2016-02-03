@@ -26,6 +26,7 @@ type CommandOptions struct {
 	Range Range
 	DryRun bool
 	Force bool
+	Verify bool
 }
 
 type ConnectOptions struct {
@@ -46,6 +47,8 @@ type Archive struct {
 	checkpointFiles map[string](map[uint32]bool)
 	allBuckets map[Hash]bool
 	referencedBuckets map[Hash]bool
+	expectedLedgerHashes map[uint32]Hash
+	foundLedgerHashes map[uint32]Hash
 	missingBuckets int
 	backend ArchiveBackend
 }
@@ -154,6 +157,8 @@ func Connect(u string, opts *ConnectOptions) (*Archive, error) {
 		checkpointFiles:make(map[string](map[uint32]bool)),
 		allBuckets:make(map[Hash]bool),
 		referencedBuckets:make(map[Hash]bool),
+		expectedLedgerHashes:make(map[uint32]Hash),
+		foundLedgerHashes:make(map[uint32]Hash),
 	}
 	if opts == nil {
 		opts = new(ConnectOptions)
