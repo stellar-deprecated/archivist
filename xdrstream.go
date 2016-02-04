@@ -18,6 +18,7 @@ import (
 type XdrStream struct {
 	buf bytes.Buffer
 	rdr io.ReadCloser
+	rdr2 io.ReadCloser
 }
 
 func NewXdrStream(in io.ReadCloser) *XdrStream {
@@ -27,9 +28,10 @@ func NewXdrStream(in io.ReadCloser) *XdrStream {
 func NewXdrGzStream(in io.ReadCloser) (*XdrStream, error) {
 	rdr, err := gzip.NewReader(in)
 	if err != nil {
+		in.Close()
 		return nil, err
 	}
-	return &XdrStream{rdr: rdr}, nil
+	return &XdrStream{rdr: rdr, rdr2: in}, nil
 }
 
 func (a *Archive) GetXdrStream(pth string) (*XdrStream, error) {
@@ -57,6 +59,9 @@ func (x *XdrStream) Close() {
 	if x.rdr != nil {
 		x.rdr.Close()
 	}
+	if x.rdr2 != nil {
+		x.rdr2.Close()
+	}
 }
 
 func (x *XdrStream) ReadOne(in interface{}) error {
@@ -64,22 +69,33 @@ func (x *XdrStream) ReadOne(in interface{}) error {
 	err := binary.Read(x.rdr, binary.BigEndian, &nbytes)
 	if err != nil {
 		if err == io.EOF {
+			x.rdr.Close()
 			return io.EOF
 		} else {
+			x.rdr.Close()
 			return err
 		}
 	}
 	nbytes &= 0x7fffffff
 	x.buf.Reset()
+	if nbytes == 0 {
+		x.rdr.Close()
+		return io.EOF
+	}
 	read, err := x.buf.ReadFrom(io.LimitReader(x.rdr, int64(nbytes)))
 	if read != int64(nbytes) {
+		x.rdr.Close()
 		return errors.New("Read wrong number of bytes from XDR")
 	}
 	if err != nil {
+		x.rdr.Close()
 		return err
 	}
 
 	readi, err := xdr.Unmarshal(&x.buf, in)
+	if err != nil {
+			x.rdr.Close()
+	}
 	if int64(readi) != int64(nbytes) {
 		return errors.New("Unmarshalled wrong number of bytes from XDR")
 	}

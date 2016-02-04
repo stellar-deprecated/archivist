@@ -116,6 +116,10 @@ func (arch *Archive) VerifyCategoryCheckpoint(cat string, chk uint32) error {
 	}
 
 	rdr, err := arch.GetXdrStream(CategoryCheckpointPath(cat, chk))
+	if err != nil {
+		return err
+	}
+	defer rdr.Close()
 
 	var tmp interface{}
 	step := func() error { return nil }
@@ -156,7 +160,6 @@ func (arch *Archive) VerifyCategoryCheckpoint(cat string, chk uint32) error {
 			return err
 		}
 	}
-	rdr.Close()
 	return nil
 }
 

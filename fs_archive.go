@@ -39,9 +39,9 @@ func (b *FsArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
 	if e != nil {
 		return e
 	}
+	defer in.Close()
+	defer out.Close()
 	_, e = io.Copy(out, in)
-	in.Close()
-	out.Close()
 	return e
 }
 

@@ -38,7 +38,9 @@ func copyPath(src *Archive, dst *Archive, pth string, opts *CommandOptions) erro
 	if err != nil {
 		return err
 	}
-	return dst.backend.PutFile(pth, rdr)
+	defer rdr.Close()
+	err = dst.backend.PutFile(pth, rdr)
+	return err
 }
 
 func Categories() []string {

@@ -47,6 +47,7 @@ func (b *S3ArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
 		Body: aws.ReadSeekCloser(in),
 	}
 	_, err := b.svc.PutObject(params)
+	in.Close()
 	return err
 }
 
