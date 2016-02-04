@@ -226,9 +226,21 @@ func (arch *Archive) ScanBuckets(opts *CommandOptions) error {
 				atomic.AddUint32(&errs, noteError(e))
 				for _, bucket := range has.Buckets() {
 					arch.NoteReferencedBucket(bucket)
-					if !doList {
+
+					if !doList || opts.Verify {
 						if arch.BucketExists(bucket) {
-							arch.NoteExistingBucket(bucket)
+							if !doList {
+								arch.NoteExistingBucket(bucket)
+							}
+							if opts.Verify {
+								n := noteError(arch.VerifyBucket(bucket))
+								atomic.AddUint32(&errs, n)
+								if n != 0 {
+									arch.mutex.Lock()
+									arch.invalidBuckets++
+									arch.mutex.Unlock()
+								}
+							}
 						}
 					}
 				}

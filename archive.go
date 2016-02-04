@@ -52,8 +52,16 @@ type Archive struct {
 	actualLedgerHashes map[uint32]Hash
 	expectTxSetHashes map[uint32]Hash
 	actualTxSetHashes map[uint32]Hash
+	expectTxResultSetHashes map[uint32]Hash
+	actualTxResultSetHashes map[uint32]Hash
 
 	missingBuckets int
+	invalidBuckets int
+
+	invalidLedgers int
+	invalidTxSets int
+	invalidTxResultSets int
+
 	backend ArchiveBackend
 }
 
@@ -165,6 +173,8 @@ func Connect(u string, opts *ConnectOptions) (*Archive, error) {
 		actualLedgerHashes:make(map[uint32]Hash),
 		expectTxSetHashes:make(map[uint32]Hash),
 		actualTxSetHashes:make(map[uint32]Hash),
+		expectTxResultSetHashes:make(map[uint32]Hash),
+		actualTxResultSetHashes:make(map[uint32]Hash),
 	}
 	if opts == nil {
 		opts = new(ConnectOptions)

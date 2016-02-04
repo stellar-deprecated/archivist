@@ -92,6 +92,8 @@ func (arch *Archive) VerifyLedgerHeaderHistoryEntry(entry *xdr.LedgerHeaderHisto
 	arch.actualLedgerHashes[seq] = h
 	arch.expectLedgerHashes[seq - 1] = Hash(entry.Header.PreviousLedgerHash)
 	arch.expectTxSetHashes[seq] = Hash(entry.Header.ScpValue.TxSetHash)
+	arch.expectTxResultSetHashes[seq] = Hash(entry.Header.TxSetResultHash)
+
 	return nil
 }
 
@@ -107,6 +109,13 @@ func (arch *Archive) VerifyTransactionHistoryEntry(entry *xdr.TransactionHistory
 }
 
 func (arch *Archive) VerifyTransactionHistoryResultEntry(entry *xdr.TransactionHistoryResultEntry) error {
+	h, err := HashXdr(&entry.TxResultSet)
+	if err != nil {
+		return err
+	}
+	arch.mutex.Lock()
+	defer arch.mutex.Unlock()
+	arch.actualTxResultSetHashes[uint32(entry.LedgerSeq)] = h
 	return nil
 }
 
@@ -165,21 +174,60 @@ func (arch *Archive) VerifyCategoryCheckpoint(cat string, chk uint32) error {
 	return nil
 }
 
-func compareHashMaps(expect map[uint32]Hash, actual map[uint32]Hash, ty string) error {
+func (arch *Archive) VerifyBucket(h Hash) error {
+	rdr, err := arch.GetXdrStream(BucketPath(h))
+	if err != nil {
+		return err
+	}
+	defer rdr.Close()
+	var entry xdr.BucketEntry
+	var actualHash Hash
+	hsh := sha256.New()
+
+	for {
+		err = rdr.ReadOne(&entry)
+		if err == nil {
+			_, err2 := xdr.Marshal(hsh, &entry)
+			if err2 != nil {
+				return err2
+			}
+		}
+		if err == io.EOF {
+			break
+		} else {
+			return err
+		}
+	}
+	sum := hsh.Sum([]byte{})
+	copy(actualHash[:], sum[:])
+
+	if actualHash != h {
+		return fmt.Errorf("Bucket hash mismatch: expected %s, got %s",
+			h, actualHash)
+	}
+	return nil
+}
+
+func reportValidity(ty string, nbad int, total int) {
+	if nbad == 0 {
+		log.Printf("Verified %d %ss have expected hashes", total, ty)
+	} else {
+		log.Printf("Error: %d %ss (of %d checked) have unexpected hashes", nbad, ty, total)
+	}
+}
+
+func compareHashMaps(expect map[uint32]Hash, actual map[uint32]Hash, ty string) int {
 	n := 0
 	for eledger, ehash := range expect {
 		ahash, ok := actual[eledger]
 		if ok && ahash != ehash {
 			n++
-			log.Printf("Mismatched hash on %s %8.8x: expected %s, got %s",
+			log.Printf("Error: mismatched hash on %s 0x%8.8x: expected %s, got %s",
 				ty, eledger, ehash, ahash)
 		}
 	}
-	log.Printf("Verified %d %ss have expected hashes", len(expect) - n, ty)
-	if n != 0 {
-		return fmt.Errorf("Found %d mismatched %ss", n, ty)
-	}
-	return nil
+	reportValidity(ty, n, len(expect))
+	return n
 }
 
 func (arch *Archive) ReportInvalid(opts *CommandOptions) error {
@@ -190,14 +238,24 @@ func (arch *Archive) ReportInvalid(opts *CommandOptions) error {
 	arch.mutex.Lock()
 	defer arch.mutex.Unlock()
 
-	n := noteError(compareHashMaps(arch.expectLedgerHashes,
-		arch.actualLedgerHashes, "ledger header"))
+	arch.invalidLedgers = compareHashMaps(arch.expectLedgerHashes,
+		arch.actualLedgerHashes, "ledger header")
 
-	n += noteError(compareHashMaps(arch.expectTxSetHashes,
-		arch.actualTxSetHashes, "transaction set"))
+	arch.invalidTxSets = compareHashMaps(arch.expectTxSetHashes,
+		arch.actualTxSetHashes, "transaction set")
 
-	if n != 0 {
-		return fmt.Errorf("Found %d validity errors", n)
+	arch.invalidTxResultSets = compareHashMaps(arch.expectTxResultSetHashes,
+		arch.actualTxResultSetHashes, "transaction result set")
+
+	reportValidity("bucket", arch.invalidBuckets, len(arch.referencedBuckets))
+
+	totalInvalid := arch.invalidBuckets
+	totalInvalid += arch.invalidLedgers
+	totalInvalid += arch.invalidTxSets
+	totalInvalid += arch.invalidTxResultSets
+
+	if totalInvalid != 0 {
+		return fmt.Errorf("Detected %d objects with unexpected hashes", totalInvalid)
 	}
 	return nil
 }
