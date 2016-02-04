@@ -45,7 +45,7 @@ func (arch *Archive) ScanCheckpointsSlow(opts *CommandOptions) error {
 	})
 
 	var wg sync.WaitGroup
-	wg.Add(concurrency)
+	wg.Add(opts.Concurrency)
 
 	req := make(chan scanCheckpointSlowReq)
 
@@ -59,7 +59,7 @@ func (arch *Archive) ScanCheckpointsSlow(opts *CommandOptions) error {
 		close(req)
 	}()
 
-	for i := 0; i < concurrency; i++ {
+	for i := 0; i < opts.Concurrency; i++ {
 		go func() {
 			for {
 				r, ok := <-req
@@ -98,7 +98,7 @@ func (arch *Archive) ScanCheckpointsFast(opts *CommandOptions) error {
 	})
 
 	var wg sync.WaitGroup
-	wg.Add(concurrency)
+	wg.Add(opts.Concurrency)
 
 	req := make(chan scanCheckpointFastReq)
 
@@ -112,7 +112,7 @@ func (arch *Archive) ScanCheckpointsFast(opts *CommandOptions) error {
 		close(req)
 	}()
 
-	for i := 0; i < concurrency; i++ {
+	for i := 0; i < opts.Concurrency; i++ {
 		go func() {
 			for {
 				r, ok := <-req
@@ -146,7 +146,7 @@ func (arch *Archive) ScanCheckpointsFast(opts *CommandOptions) error {
 
 func (arch *Archive) Scan(opts *CommandOptions) error {
 	e1 := arch.ScanCheckpoints(opts)
-	e2 := arch.ScanBuckets()
+	e2 := arch.ScanBuckets(opts)
 	if e1 != nil {
 		return e1
 	}
@@ -177,7 +177,7 @@ func (arch *Archive) ScanAllBuckets() error {
 	return nil
 }
 
-func (arch *Archive) ScanBuckets() error {
+func (arch *Archive) ScanBuckets(opts *CommandOptions) error {
 
 	var errs uint32
 
@@ -200,7 +200,7 @@ func (arch *Archive) ScanBuckets() error {
 	arch.mutex.Unlock()
 
 	var wg sync.WaitGroup
-	wg.Add(concurrency)
+	wg.Add(opts.Concurrency)
 
 	tick := makeTicker(func(_ uint){
 		arch.ReportBucketStats()
@@ -215,7 +215,7 @@ func (arch *Archive) ScanBuckets() error {
 		}
 		close(req)
 	}()
-	for i := 0; i < concurrency; i++ {
+	for i := 0; i < opts.Concurrency; i++ {
 		go func() {
 			for {
 				ix, ok := <- req

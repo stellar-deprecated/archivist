@@ -118,6 +118,12 @@ func main() {
 			Value: -1,
 			Destination: &opts.Last,
 		},
+		&cli.IntFlag{
+			Name: "concurrency, c",
+			Usage: "number of files to operate on concurrently",
+			Value: 32,
+			Destination: &opts.CommandOpts.Concurrency,
+		},
 		&cli.StringFlag{
 			Name: "s3region",
 			Usage: "S3 region to connect to",

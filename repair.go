@@ -41,7 +41,7 @@ func Repair(src *Archive, dst *Archive, opts *CommandOptions) error {
 		errs += noteError(dst.ScanCheckpoints(opts))
 	}
 
-	errs += noteError(dst.ScanBuckets())
+	errs += noteError(dst.ScanBuckets(opts))
 
 	log.Printf("Examining buckets referenced by checkpoints")
 	missingBuckets := dst.CheckBucketsMissing()

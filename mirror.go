@@ -40,8 +40,8 @@ func Mirror(src *Archive, dst *Archive, opts *CommandOptions) error {
 
 	var wg sync.WaitGroup
 	checkpoints := opts.Range.Checkpoints()
-	wg.Add(concurrency)
-	for i := 0; i < concurrency; i++ {
+	wg.Add(opts.Concurrency)
+	for i := 0; i < opts.Concurrency; i++ {
 		go func() {
 			for {
 				ix, ok := <- checkpoints
