@@ -100,6 +100,8 @@ func (arch *Archive) VerifyTransactionHistoryEntry(entry *xdr.TransactionHistory
 	if err != nil {
 		return err
 	}
+	arch.mutex.Lock()
+	defer arch.mutex.Unlock()
 	arch.actualTxSetHashes[uint32(entry.LedgerSeq)] = h
 	return nil
 }
