@@ -187,18 +187,17 @@ func (arch *Archive) VerifyBucket(h Hash) error {
 	var entry xdr.BucketEntry
 	var actualHash Hash
 	hsh := sha256.New()
-
 	for {
 		err = rdr.ReadOne(&entry)
 		if err == nil {
-			_, err2 := xdr.Marshal(hsh, &entry)
+			err2 := WriteFramedXdr(hsh, &entry)
 			if err2 != nil {
 				return err2
 			}
 		}
 		if err == io.EOF {
 			break
-		} else {
+		} else if err != nil {
 			return err
 		}
 	}
@@ -220,11 +219,15 @@ func reportValidity(ty string, nbad int, total int) {
 	}
 }
 
-func compareHashMaps(expect map[uint32]Hash, actual map[uint32]Hash, ty string) int {
+func compareHashMaps(expect map[uint32]Hash, actual map[uint32]Hash, ty string,
+	passOn func(eledger uint32, ehash Hash) bool) int {
 	n := 0
 	for eledger, ehash := range expect {
 		ahash, ok := actual[eledger]
-		if ok && ahash != ehash {
+		if !ok && passOn(eledger, ehash) {
+			continue
+		}
+		if ahash != ehash {
 			n++
 			log.Printf("Error: mismatched hash on %s 0x%8.8x: expected %s, got %s",
 				ty, eledger, ehash, ahash)
@@ -242,14 +245,37 @@ func (arch *Archive) ReportInvalid(opts *CommandOptions) error {
 	arch.mutex.Lock()
 	defer arch.mutex.Unlock()
 
+	lowest := uint32(0xffffffff)
+	for i, _ := range arch.expectLedgerHashes {
+		if i < lowest {
+			lowest = i
+		}
+	}
+
 	arch.invalidLedgers = compareHashMaps(arch.expectLedgerHashes,
-		arch.actualLedgerHashes, "ledger header")
+		arch.actualLedgerHashes, "ledger header",
+		func(eledger uint32, ehash Hash) bool {
+			// We will never have the lowest expected ledger, because
+			// it's one-before the first checkpoint we scanned.
+			return eledger == lowest
+		})
 
 	arch.invalidTxSets = compareHashMaps(arch.expectTxSetHashes,
-		arch.actualTxSetHashes, "transaction set")
+		arch.actualTxSetHashes, "transaction set",
+		func(eledger uint32, ehash Hash) bool {
+			// When there was an empty txset, it produces just the hash of
+			// the previous ledger header followed by nothing.
+			return ehash == HashEmptyTxSet(arch.expectLedgerHashes[eledger-1])
+		})
 
+	emptyXdrArrayHash := EmptyXdrArrayHash()
 	arch.invalidTxResultSets = compareHashMaps(arch.expectTxResultSetHashes,
-		arch.actualTxResultSetHashes, "transaction result set")
+		arch.actualTxResultSetHashes, "transaction result set",
+		func(eledger uint32, ehash Hash) bool {
+			// When there was an empty txresultset, it produces just the hash of
+			// the 4-zero-byte "0 entries" XDR array.
+			return ehash == emptyXdrArrayHash
+		})
 
 	reportValidity("bucket", arch.invalidBuckets, len(arch.referencedBuckets))
 

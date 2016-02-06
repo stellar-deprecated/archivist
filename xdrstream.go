@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"fmt"
 	"strings"
 	"errors"
 	"compress/gzip"
@@ -68,11 +69,10 @@ func (x *XdrStream) ReadOne(in interface{}) error {
 	var nbytes uint32
 	err := binary.Read(x.rdr, binary.BigEndian, &nbytes)
 	if err != nil {
-		if err == io.EOF {
-			x.rdr.Close()
+		x.rdr.Close()
+		if err == io.ErrUnexpectedEOF {
 			return io.EOF
 		} else {
-			x.rdr.Close()
 			return err
 		}
 	}
@@ -93,11 +93,24 @@ func (x *XdrStream) ReadOne(in interface{}) error {
 	}
 
 	readi, err := xdr.Unmarshal(&x.buf, in)
-	if err != nil {
-			x.rdr.Close()
-	}
 	if int64(readi) != int64(nbytes) {
-		return errors.New("Unmarshalled wrong number of bytes from XDR")
+		return fmt.Errorf("Unmarshalled %d bytes from XDR, expected %d)",
+			readi, nbytes)
+	}
+	return err
+}
+
+func WriteFramedXdr(out io.Writer, in interface{}) error {
+	var tmp bytes.Buffer
+	n, err := xdr.Marshal(&tmp, in)
+	if n > 0x7fffffff {
+		return fmt.Errorf("Overlong write: %d bytes", n)
+	}
+	nbytes := uint32(n | 0x80000000)
+	binary.Write(out, binary.BigEndian, &nbytes)
+	k, err := tmp.WriteTo(out)
+	if int64(n) != k {
+		return fmt.Errorf("Mismatched write length: %d vs. %d", n, k)
 	}
 	return err
 }
