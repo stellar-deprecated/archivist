@@ -14,6 +14,7 @@ import (
 	"os"
 	"math/big"
 	"github.com/stretchr/testify/assert"
+	"github.com/stellar/go-stellar-base/xdr"
 )
 
 func GetTestS3Archive() *Archive {
@@ -205,4 +206,82 @@ func TestDryRunNoRepair(t *testing.T) {
 	opts.DryRun = true;
 	Repair(src, dst, opts)
 	assert.NotEqual(t, 0, countMissing(dst, opts))
+}
+
+func TestXdrDecode(t *testing.T) {
+
+	xdrbytes := []byte {
+
+		0, 0, 0, 0,         // entry type 0, liveentry
+
+		0, 32, 223, 100,    // lastmodified 2154340
+
+		0, 0, 0, 0,         // entry type 0, account
+
+		0, 0, 0, 0,         // key type 0
+		23, 140, 68, 253,   // ed25519 key (32 bytes)
+		184, 162, 186, 195,
+		118, 239, 158, 210,
+		100, 241, 174, 254,
+		108, 110, 165, 140,
+		75, 76, 83, 141,
+		104, 212, 227, 80,
+		1, 214, 157, 7,
+
+		0, 0, 0, 29,        // 64bit balance: 125339976000
+		46, 216, 65, 64,
+
+		0, 0, 129, 170,     // 64bit seqnum: 142567144423475
+		0, 0, 0, 51,
+
+		0, 0, 0, 1,         // numsubentries: 1
+
+		0, 0, 0, 1,         // inflationdest type, populated
+
+		0, 0, 0, 0,         // key type 0
+		87, 240, 19, 71,    // ed25519 key (32 bytes)
+		52, 91, 9, 62,
+		213, 239, 178, 85,
+		161, 119, 108, 251,
+		168, 90, 76, 116,
+		12, 48, 134, 248,
+		115, 255, 117, 50,
+		19, 18, 170, 203,
+
+		0, 0, 0, 0,         // flags
+
+		0, 0, 0, 19,        // homedomain: 19 bytes + 1 null padding
+		99, 101, 110, 116,  // "centaurus.xcoins.de"
+		97, 117, 114, 117,
+		115, 46, 120, 99,
+		111, 105, 110, 115,
+		46, 100, 101, 0,
+
+		1, 0, 0, 0,         // thresholds
+		0, 0, 0, 0,         // signers (null)
+
+		0, 0, 0, 0,         // entry.account.ext.v: 0
+
+		0, 0, 0, 0,         // entry.ext.v: 0
+	}
+
+	assert.Equal(t, len(xdrbytes), 152)
+
+	var tmp xdr.BucketEntry
+	n, err := xdr.Unmarshal(bytes.NewReader(xdrbytes[:]), &tmp)
+	fmt.Printf("Decoded %d bytes\n", n)
+	if err != nil {
+		panic(err)
+	}
+	assert.Equal(t, len(xdrbytes), n)
+
+	var out bytes.Buffer
+	n, err = xdr.Marshal(&out, &tmp)
+	fmt.Printf("Encoded %d bytes\n", n)
+	if err != nil {
+		panic(err)
+	}
+
+	assert.Equal(t, out.Len(), n)
+	assert.Equal(t, out.Bytes(), xdrbytes)
 }
