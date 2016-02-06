@@ -181,6 +181,15 @@ func main() {
 				repair(src, dst, &opts)
 			},
 		},
+		{
+			Name: "dumpxdr",
+			Action: func(c *cli.Context) {
+				err := archivist.DumpXdrAsJson(c.Args())
+				if err != nil {
+					log.Fatal(err)
+				}
+			},
+		},
 	}
 	app.Run(os.Args)
 }
