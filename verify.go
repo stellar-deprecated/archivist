@@ -77,6 +77,10 @@ func HashTxSet(txset *xdr.TransactionSet) (Hash, error) {
 	return h, nil
 }
 
+func HashEmptyTxSet(previousLedgerHash Hash) Hash {
+	return Hash(sha256.Sum256(previousLedgerHash[:]))
+}
+
 func (arch *Archive) VerifyLedgerHeaderHistoryEntry(entry *xdr.LedgerHeaderHistoryEntry) error {
 	h, err := HashXdr(&entry.Header)
 	if err != nil {
