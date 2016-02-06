@@ -130,6 +130,10 @@ func testRange() Range {
 	return Range{Low:63, High:0x3bf}
 }
 
+func testOptions() *CommandOptions {
+	return &CommandOptions{Range:testRange(),Concurrency:16}
+}
+
 func GetRandomPopulatedArchive() *Archive {
 	a := GetTestArchive()
 	a.PopulateRandomRange(testRange())
@@ -138,7 +142,7 @@ func GetRandomPopulatedArchive() *Archive {
 
 func TestScan(t *testing.T) {
 	defer cleanup()
-	opts := &CommandOptions{Range:testRange()}
+	opts := testOptions()
 	GetRandomPopulatedArchive().Scan(opts)
 }
 
@@ -154,7 +158,7 @@ func countMissing(arch *Archive, opts *CommandOptions) int {
 
 func TestMirror(t *testing.T) {
 	defer cleanup()
-	opts := &CommandOptions{Range:testRange()}
+	opts := testOptions()
 	src := GetRandomPopulatedArchive()
 	dst := GetTestArchive()
 	Mirror(src, dst, opts)
@@ -174,7 +178,7 @@ func copyFile(category string, checkpoint uint32, src *Archive, dst *Archive) {
 
 func TestMirrorThenRepair(t *testing.T) {
 	defer cleanup()
-	opts := &CommandOptions{Range:testRange()}
+	opts := testOptions()
 	src := GetRandomPopulatedArchive()
 	dst := GetTestArchive()
 	Mirror(src, dst, opts)
@@ -189,7 +193,7 @@ func TestMirrorThenRepair(t *testing.T) {
 
 func TestDryRunNoRepair(t *testing.T) {
 	defer cleanup()
-	opts := &CommandOptions{Range:testRange()}
+	opts := testOptions()
 	src := GetRandomPopulatedArchive()
 	dst := GetTestArchive()
 	Mirror(src, dst, opts)

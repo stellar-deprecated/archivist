@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"strings"
+	"errors"
 )
 
 type scanCheckpointFastReq struct {
@@ -39,6 +40,11 @@ func (arch *Archive) ScanCheckpoints(opts *CommandOptions) error {
 }
 
 func (arch *Archive) ScanCheckpointsSlow(opts *CommandOptions) error {
+
+	if opts.Concurrency == 0 {
+		return errors.New("Zero concurrency")
+	}
+
 	var errs uint32
 	tick := makeTicker(func(_ uint){
 		arch.ReportCheckpointStats()
@@ -91,6 +97,10 @@ func (arch *Archive) ScanCheckpointsSlow(opts *CommandOptions) error {
 
 
 func (arch *Archive) ScanCheckpointsFast(opts *CommandOptions) error {
+
+	if opts.Concurrency == 0 {
+		return errors.New("Zero concurrency")
+	}
 
 	var errs uint32
 	tick := makeTicker(func(_ uint){
@@ -178,6 +188,10 @@ func (arch *Archive) ScanAllBuckets() error {
 }
 
 func (arch *Archive) ScanBuckets(opts *CommandOptions) error {
+
+	if opts.Concurrency == 0 {
+		return errors.New("Zero concurrency")
+	}
 
 	var errs uint32
 
