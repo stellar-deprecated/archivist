@@ -9,6 +9,8 @@ import (
 	"github.com/codegangsta/cli"
 	"fmt"
 	"log"
+	_ "net/http/pprof"
+	"net/http"
 	"github.com/stellar/archivist"
 )
 
@@ -33,6 +35,7 @@ type Options struct {
 	Low int
 	High int
 	Last int
+	Profile bool
 	CommandOpts archivist.CommandOptions
 	ConnectOpts archivist.ConnectOptions
 }
@@ -51,6 +54,14 @@ func (opts *Options) SetRange(arch *archivist.Archive) {
 		archivist.MakeRange(uint32(opts.Low),
 		uint32(opts.High))
 
+}
+
+func (opts *Options) MaybeProfile() {
+	if opts.Profile {
+		go func() {
+			log.Println(http.ListenAndServe("localhost:6060", nil))
+		}()
+	}
 }
 
 func scan(a string, opts *Options) {
@@ -150,7 +161,13 @@ func main() {
 			Usage: "decode and re-encode all buckets",
 			Destination: &opts.CommandOpts.Thorough,
 		},
+		&cli.BoolFlag{
+			Name: "profile",
+			Usage: "collect and serve profile locally",
+			Destination: &opts.Profile,
+		},
 	}
+
 	app.Commands = []cli.Command{
 		{
 			Name: "status",
@@ -161,12 +178,14 @@ func main() {
 		{
 			Name: "scan",
 			Action: func(c *cli.Context) {
+				opts.MaybeProfile()
 				scan(c.Args().First(), &opts)
 			},
 		},
 		{
 			Name: "mirror",
 			Action: func(c *cli.Context) {
+				opts.MaybeProfile()
 				src := c.Args()[0]
 				dst := c.Args()[1]
 				if len(c.Args()) != 2 || src == "" || dst == "" {
@@ -178,6 +197,7 @@ func main() {
 		{
 			Name: "repair",
 			Action: func(c *cli.Context) {
+				opts.MaybeProfile()
 				src := c.Args()[0]
 				dst := c.Args()[1]
 				if len(c.Args()) != 2 || src == "" || dst == "" {
