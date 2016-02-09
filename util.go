@@ -8,6 +8,8 @@ import (
 	"path"
 	"log"
 	"fmt"
+	"bufio"
+	"io"
 )
 
 func makeTicker(onTick func(uint)) chan bool {
@@ -24,6 +26,12 @@ func makeTicker(onTick func(uint)) chan bool {
 	return tick
 }
 
+func bufReadCloser(in io.ReadCloser) io.ReadCloser {
+	return struct {
+		io.Reader
+		io.Closer
+	}{bufio.NewReader(in), in}
+}
 
 func copyPath(src *Archive, dst *Archive, pth string, opts *CommandOptions) error {
 	if opts.DryRun {
@@ -39,7 +47,7 @@ func copyPath(src *Archive, dst *Archive, pth string, opts *CommandOptions) erro
 		return err
 	}
 	defer rdr.Close()
-	err = dst.backend.PutFile(pth, rdr)
+	err = dst.backend.PutFile(pth, bufReadCloser(rdr))
 	return err
 }
 

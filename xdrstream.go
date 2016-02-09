@@ -23,16 +23,16 @@ type XdrStream struct {
 }
 
 func NewXdrStream(in io.ReadCloser) *XdrStream {
-	return &XdrStream{rdr: in}
+	return &XdrStream{rdr: bufReadCloser(in)}
 }
 
 func NewXdrGzStream(in io.ReadCloser) (*XdrStream, error) {
-	rdr, err := gzip.NewReader(in)
+	rdr, err := gzip.NewReader(bufReadCloser(in))
 	if err != nil {
 		in.Close()
 		return nil, err
 	}
-	return &XdrStream{rdr: rdr, rdr2: in}, nil
+	return &XdrStream{rdr: bufReadCloser(rdr), rdr2: in}, nil
 }
 
 func (a *Archive) GetXdrStream(pth string) (*XdrStream, error) {
@@ -82,6 +82,7 @@ func (x *XdrStream) ReadOne(in interface{}) error {
 		x.rdr.Close()
 		return io.EOF
 	}
+	x.buf.Grow(int(nbytes))
 	read, err := x.buf.ReadFrom(io.LimitReader(x.rdr, int64(nbytes)))
 	if read != int64(nbytes) {
 		x.rdr.Close()
