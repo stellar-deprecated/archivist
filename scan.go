@@ -239,7 +239,10 @@ func (arch *Archive) ScanBuckets(opts *CommandOptions) error {
 				has, e := arch.GetCheckpointHAS(ix)
 				atomic.AddUint32(&errs, noteError(e))
 				for _, bucket := range has.Buckets() {
-					arch.NoteReferencedBucket(bucket)
+					new := arch.NoteReferencedBucket(bucket)
+					if !new {
+						continue
+					}
 
 					if !doList || opts.Verify {
 						if arch.BucketExists(bucket) {
@@ -318,10 +321,15 @@ func (arch *Archive) NoteExistingBucket(bucket Hash) {
 	arch.allBuckets[bucket] = true
 }
 
-func (arch *Archive) NoteReferencedBucket(bucket Hash) {
+func (arch *Archive) NoteReferencedBucket(bucket Hash) bool {
 	arch.mutex.Lock()
 	defer arch.mutex.Unlock()
+	_, exists := arch.referencedBuckets[bucket]
+	if exists {
+		return false
+	}
 	arch.referencedBuckets[bucket] = true
+	return true
 }
 
 
