@@ -27,6 +27,7 @@ type CommandOptions struct {
 	DryRun bool
 	Force bool
 	Verify bool
+	Thorough bool
 }
 
 type ConnectOptions struct {

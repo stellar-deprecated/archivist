@@ -11,6 +11,8 @@ import (
 	"bytes"
 	"sort"
 	"crypto/sha256"
+	"compress/gzip"
+	"hash"
 	"github.com/stellar/go-stellar-base/xdr"
 )
 
@@ -178,14 +180,39 @@ func (arch *Archive) VerifyCategoryCheckpoint(cat string, chk uint32) error {
 	return nil
 }
 
-func (arch *Archive) VerifyBucket(h Hash) error {
+func checkBucketHash(hasher hash.Hash, expect Hash) error {
+	var actual Hash
+	sum := hasher.Sum([]byte{})
+	copy(actual[:], sum[:])
+	if actual != expect {
+		return fmt.Errorf("Bucket hash mismatch: expected %s, got %s",
+			expect, actual)
+	}
+	return nil
+}
+
+func (arch *Archive) VerifyBucketHash(h Hash) error {
+	rdr, err := arch.backend.GetFile(BucketPath(h))
+	if err != nil {
+		return err
+	}
+	defer rdr.Close()
+	hsh := sha256.New()
+	rdr, err = gzip.NewReader(bufReadCloser(rdr))
+	if err != nil {
+		return err
+	}
+	io.Copy(hsh, bufReadCloser(rdr))
+	return checkBucketHash(hsh, h)
+}
+
+func (arch *Archive) VerifyBucketEntries(h Hash) error {
 	rdr, err := arch.GetXdrStream(BucketPath(h))
 	if err != nil {
 		return err
 	}
 	defer rdr.Close()
 	var entry xdr.BucketEntry
-	var actualHash Hash
 	hsh := sha256.New()
 	for {
 		err = rdr.ReadOne(&entry)
@@ -201,14 +228,7 @@ func (arch *Archive) VerifyBucket(h Hash) error {
 			return err
 		}
 	}
-	sum := hsh.Sum([]byte{})
-	copy(actualHash[:], sum[:])
-
-	if actualHash != h {
-		return fmt.Errorf("Bucket hash mismatch: expected %s, got %s",
-			h, actualHash)
-	}
-	return nil
+	return checkBucketHash(hsh, h)
 }
 
 func reportValidity(ty string, nbad int, total int) {

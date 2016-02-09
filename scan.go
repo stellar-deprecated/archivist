@@ -247,7 +247,12 @@ func (arch *Archive) ScanBuckets(opts *CommandOptions) error {
 								arch.NoteExistingBucket(bucket)
 							}
 							if opts.Verify {
-								n := noteError(arch.VerifyBucket(bucket))
+								n := uint32(0)
+								if opts.Thorough {
+									n = noteError(arch.VerifyBucketEntries(bucket))
+								} else {
+									n = noteError(arch.VerifyBucketHash(bucket))
+								}
 								atomic.AddUint32(&errs, n)
 								if n != 0 {
 									arch.mutex.Lock()

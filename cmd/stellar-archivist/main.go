@@ -145,6 +145,11 @@ func main() {
 			Usage: "verify file contents",
 			Destination: &opts.CommandOpts.Verify,
 		},
+		&cli.BoolFlag{
+			Name: "thorough",
+			Usage: "decode and re-encode all buckets",
+			Destination: &opts.CommandOpts.Thorough,
+		},
 	}
 	app.Commands = []cli.Command{
 		{
