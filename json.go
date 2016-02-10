@@ -11,6 +11,7 @@ import (
 	"path"
 	"strings"
 	"encoding/json"
+	"compress/gzip"
 	"github.com/stellar/go-stellar-base/xdr"
 )
 
@@ -20,12 +21,22 @@ func DumpXdrAsJson(args []string) error {
 	var thre xdr.TransactionHistoryResultEntry
 	var bke xdr.BucketEntry
 	var tmp interface{}
+	var rdr io.ReadCloser
+	var err error
 
 	for _, arg := range args {
-		rdr, err := os.Open(arg)
+		rdr, err = os.Open(arg)
 		if err != nil {
 			return err
 		}
+
+		if strings.HasSuffix(arg, ".gz") {
+			rdr, err = gzip.NewReader(rdr)
+			if err != nil {
+				return err
+			}
+		}
+
 		base := path.Base(arg)
 		if strings.HasPrefix(base, "bucket") {
 			tmp = &bke
