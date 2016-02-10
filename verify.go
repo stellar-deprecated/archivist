@@ -140,6 +140,7 @@ func (arch *Archive) VerifyCategoryCheckpoint(cat string, chk uint32) error {
 
 	var tmp interface{}
 	step := func() error { return nil }
+	reset := func() { }
 
 	var lhe xdr.LedgerHeaderHistoryEntry
 	var the xdr.TransactionHistoryEntry
@@ -151,21 +152,31 @@ func (arch *Archive) VerifyCategoryCheckpoint(cat string, chk uint32) error {
 		step = func() error {
 			return arch.VerifyLedgerHeaderHistoryEntry(&lhe)
 		}
+		reset = func() {
+			lhe = xdr.LedgerHeaderHistoryEntry{}
+		}
 	case "transactions":
 		tmp = &the
 		step = func() error {
 			return arch.VerifyTransactionHistoryEntry(&the)
+		}
+		reset = func() {
+			the = xdr.TransactionHistoryEntry{}
 		}
 	case "results":
 		tmp = &thre
 		step = func() error {
 			return arch.VerifyTransactionHistoryResultEntry(&thre)
 		}
+		reset = func() {
+			thre = xdr.TransactionHistoryResultEntry{}
+		}
 	default:
 		return nil
 	}
 
 	for {
+		reset()
 		if err = rdr.ReadOne(&tmp); err != nil {
 			if err == io.EOF {
 				break
@@ -212,9 +223,9 @@ func (arch *Archive) VerifyBucketEntries(h Hash) error {
 		return err
 	}
 	defer rdr.Close()
-	var entry xdr.BucketEntry
 	hsh := sha256.New()
 	for {
+		var entry xdr.BucketEntry
 		err = rdr.ReadOne(&entry)
 		if err == nil {
 			err2 := WriteFramedXdr(hsh, &entry)
