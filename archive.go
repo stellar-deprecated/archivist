@@ -112,7 +112,11 @@ func (a *Archive) PutCheckpointHAS(chk uint32, has HistoryArchiveState, opts *Co
 }
 
 func (a *Archive) PutRootHAS(has HistoryArchiveState, opts *CommandOptions) error {
-	return a.PutPathHAS(rootHASPath, has, opts)
+	force := opts.Force
+	opts.Force = true
+	e := a.PutPathHAS(rootHASPath, has, opts)
+	opts.Force = force
+	return e
 }
 
 func (a *Archive) ListBucket(dp DirPrefix) (chan string, chan error) {
