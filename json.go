@@ -20,6 +20,7 @@ func DumpXdrAsJson(args []string) error {
 	var the xdr.TransactionHistoryEntry
 	var thre xdr.TransactionHistoryResultEntry
 	var bke xdr.BucketEntry
+	var scp xdr.ScpHistoryEntry
 	var tmp interface{}
 	var rdr io.ReadCloser
 	var err error
@@ -46,6 +47,8 @@ func DumpXdrAsJson(args []string) error {
 			tmp = &the
 		} else if strings.HasPrefix(base, "results") {
 			tmp = &thre
+		} else if strings.HasPrefix(base, "scp") {
+			tmp = &scp
 		} else {
 			return fmt.Errorf("Error: unrecognized XDR file type %s", base)
 		}
