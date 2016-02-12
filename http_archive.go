@@ -32,10 +32,16 @@ func (b *HttpArchiveBackend) GetFile(pth string) (io.ReadCloser, error) {
 	derived.Path = path.Join(derived.Path, pth)
 	resp, err := b.client.Get(derived.String())
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		return nil, err
 	}
 	err = checkResp(resp)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		return nil, err
 	}
 	return resp.Body, nil
@@ -45,6 +51,9 @@ func (b *HttpArchiveBackend) Exists(pth string) bool {
 	var derived url.URL = b.base
 	derived.Path = path.Join(derived.Path, pth)
 	resp, err := b.client.Head(derived.String())
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
 	return err == nil && resp != nil && checkResp(resp) == nil
 }
 
