@@ -7,6 +7,7 @@ package archivist
 import (
 	"io"
 	"path"
+	"fmt"
 	"net/http"
 	"net/url"
 	"errors"
@@ -17,10 +18,23 @@ type HttpArchiveBackend struct {
 	base url.URL
 }
 
+func checkResp(r *http.Response) error {
+	if r.StatusCode >= 200 && r.StatusCode < 400 {
+		return nil
+	} else {
+		return fmt.Errorf("Bad HTTP response '%s' for GET '%s'",
+			r.Status, r.Request.URL.String())
+	}
+}
+
 func (b *HttpArchiveBackend) GetFile(pth string) (io.ReadCloser, error) {
 	var derived url.URL = b.base
 	derived.Path = path.Join(derived.Path, pth)
 	resp, err := b.client.Get(derived.String())
+	if err != nil {
+		return nil, err
+	}
+	err = checkResp(resp)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +45,7 @@ func (b *HttpArchiveBackend) Exists(pth string) bool {
 	var derived url.URL = b.base
 	derived.Path = path.Join(derived.Path, pth)
 	resp, err := b.client.Head(derived.String())
-	return err == nil && resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 400
+	return err == nil && resp != nil && checkResp(resp) == nil
 }
 
 func (b *HttpArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
