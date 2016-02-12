@@ -76,6 +76,9 @@ func Mirror(src *Archive, dst *Archive, opts *CommandOptions) error {
 					}
 					pth := CategoryCheckpointPath(cat, ix)
 					e = copyPath(src, dst, pth, opts)
+					if e != nil && !categoryRequired(cat) {
+						continue
+					}
 					atomic.AddUint32(&errs, noteError(e))
 				}
 				tick <- true
