@@ -372,16 +372,13 @@ func (arch *Archive) ReportMissing(opts *CommandOptions) error {
 
 	missingCheckpoints := false
 	for cat, missing := range missingCheckpointFiles {
-		s := make([]string, 0)
 		if !categoryRequired(cat) {
 			continue
 		}
-		for _, m := range missing {
-			s = append(s, fmt.Sprintf("0x%8.8x", m))
-		}
 		if len(missing) != 0 {
+			s := fmtRangeList(missing)
 			missingCheckpoints = true
-			log.Printf("Missing %s: %s", cat, strings.Join(s, ", "))
+			log.Printf("Missing %s: %s", cat, s)
 		}
 	}
 

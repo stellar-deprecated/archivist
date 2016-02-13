@@ -6,6 +6,8 @@ package archivist
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 )
 
 const CheckpointFreq = uint32(64)
@@ -75,4 +77,44 @@ func (r Range) Checkpoints() chan uint32 {
 
 func (r Range) Size() int {
 	return int(r.High - r.Low) / int(CheckpointFreq)
+}
+
+func (r Range) CollapsedString() string {
+	if r.Low == r.High {
+		return fmt.Sprintf("0x%8.8x", r.Low)
+	} else {
+		return fmt.Sprintf("[0x%8.8x-0x%8.8x]", r.Low, r.High)
+	}
+}
+
+type ByUint32 []uint32
+func (a ByUint32) Len() int           { return len(a) }
+func (a ByUint32) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByUint32) Less(i, j int) bool { return a[i] < a[j] }
+
+
+func fmtRangeList(vs []uint32) string {
+
+	sort.Sort(ByUint32(vs))
+
+	s := make([]string, 0, 10)
+	var curr *Range
+
+	for _, t := range vs {
+		if curr != nil {
+			if curr.High + CheckpointFreq == t {
+				curr.High = t
+				continue
+			} else {
+				s = append(s, curr.CollapsedString())
+				curr = nil
+			}
+		}
+		curr = &Range{Low:t, High:t}
+	}
+	if curr != nil {
+		s = append(s, curr.CollapsedString())
+	}
+
+	return strings.Join(s, ", ")
 }
