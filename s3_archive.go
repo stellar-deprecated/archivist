@@ -7,6 +7,7 @@ package archivist
 import (
 	"io"
 	"path"
+	"bytes"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -40,13 +41,19 @@ func (b *S3ArchiveBackend) Exists(pth string) bool {
 }
 
 func (b *S3ArchiveBackend) PutFile(pth string, in io.ReadCloser) error {
+	var buf bytes.Buffer
+	_, err := buf.ReadFrom(in)
+	in.Close()
+	if err != nil {
+		return err
+	}
 	params := &s3.PutObjectInput{
 		Bucket: aws.String(b.bucket),
 		Key: aws.String(path.Join(b.prefix, pth)),
 		ACL: aws.String(s3.ObjectCannedACLPublicRead),
-		Body: aws.ReadSeekCloser(in),
+		Body: bytes.NewReader(buf.Bytes()),
 	}
-	_, err := b.svc.PutObject(params)
+	_, err = b.svc.PutObject(params)
 	in.Close()
 	return err
 }
