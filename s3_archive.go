@@ -65,6 +65,7 @@ func (b *S3ArchiveBackend) ListFiles(pth string) (chan string, chan error) {
 	if err != nil {
 		errs <- err
 		close(ch)
+		close(errs)
 		return ch, errs
 	}
 	go func() {
@@ -83,6 +84,7 @@ func (b *S3ArchiveBackend) ListFiles(pth string) (chan string, chan error) {
 			}
 		}
 		close(ch)
+		close(errs)
 	}()
 	return ch, errs
 }
