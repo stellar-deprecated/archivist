@@ -27,6 +27,10 @@ func Repair(src *Archive, dst *Archive, opts *CommandOptions) error {
 	for cat, missing := range missingCheckpointFiles {
 		for _, chk := range missing {
 			pth := CategoryCheckpointPath(cat, chk)
+			if !categoryRequired(cat) && !src.backend.Exists(pth) {
+				log.Printf("Skipping nonexistent, optional %s file %s", cat, pth)
+				continue
+			}
 			log.Printf("Repairing %s", pth)
 			errs += noteError(copyPath(src, dst, pth, opts))
 			if cat == "history" {
