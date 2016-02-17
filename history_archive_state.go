@@ -16,7 +16,7 @@ type HistoryArchiveState struct {
 		Next struct {
 			State uint32          `json:"state"`
 			Output string         `json:"output,omitempty"`
-		}
+		}                         `json:"next"`
 	}                             `json:"currentBuckets"`
 }
 
